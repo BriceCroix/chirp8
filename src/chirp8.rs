@@ -10,9 +10,10 @@ const RAM_SIZE: usize = 0x1000;
 const RAM_MASK: u16 = (RAM_SIZE - 1) as u16;
 /// Every Program should start at this address.
 const PROGRAM_START: usize = 0x200;
+/// The maximum size a program can use.
 pub const PROGRAM_SIZE: usize = RAM_SIZE - PROGRAM_START;
-const SCREEN_WIDTH: u8 = 64;
-const SCREEN_HEIGHT: u8 = 32;
+pub const MAX_DISPLAY_WIDTH: usize = 128;
+pub const MAX_DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
 /// Numbers of keys used by the system.
@@ -42,12 +43,17 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+/// The display size currently used by the emulator.
+pub struct DisplaySize {
+    pub width: usize,
+    pub height: usize,
+}
 
 /// Chip-8 Emulator.
 pub struct Chirp8 {
     ram: [u8; RAM_SIZE],
-    /// True is a white pixel, false is a black pixel.
-    display: [[bool; SCREEN_WIDTH as usize]; SCREEN_HEIGHT as usize],
+    /// Display buffer, true when pixel is on, false otherwise.
+    display_buffer: [bool; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT],
     /// V0 to VF.
     registers: [u8; REGISTERS_COUNT],
     /// Program counter.
@@ -77,7 +83,7 @@ impl Chirp8 {
         // Create emulator
         Self {
             ram: ram,
-            display: [[false; SCREEN_WIDTH as usize]; SCREEN_HEIGHT as usize],
+            display_buffer: [false; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT],
             registers: [0; REGISTERS_COUNT],
             pc: PROGRAM_START as u16,
             index: 0,
@@ -134,7 +140,7 @@ impl Chirp8 {
         match opcode {
             0x0 => match instruction {
                 // Clear screen
-                0x00E0 => self.display = [[false; SCREEN_WIDTH as usize]; SCREEN_HEIGHT as usize],
+                0x00E0 => self.display_buffer.fill(false),
                 // Return from subroutine
                 0x00EE => self.pc = self.stack.pop().ok().unwrap(),
                 _ => panic!("Unrecognized 0 instruction {:x}", instruction),
@@ -235,13 +241,7 @@ impl Chirp8 {
             // Random
             0xC => self.registers[x] = (self.randomizer.next_u32() as u8) & nn,
             // Display
-            0xD => self.display(
-                (
-                    self.registers[x] % SCREEN_WIDTH,
-                    self.registers[y] % SCREEN_HEIGHT,
-                ),
-                n,
-            ),
+            0xD => self.display((self.registers[x], self.registers[y]), n),
             // Skip if key
             0xE => match nn {
                 0x9E => {
@@ -342,19 +342,35 @@ impl Chirp8 {
         Option::None
     }
 
+    /// Returns the display size based on the current mode.
+    pub fn get_display_size(&self) -> DisplaySize {
+        match self.mode {
+            Chirp8Mode::CosmacChip8 => DisplaySize {
+                width: 64,
+                height: 32,
+            },
+            Chirp8Mode::SuperChip => DisplaySize {
+                width: 128,
+                height: 64,
+            },
+        }
+    }
+
     /// Display character pointed by index register at given coordinates.
     fn display(&mut self, x_y_coordinates: (u8, u8), sprite_height: u8) {
+        let size = self.get_display_size();
         self.display_changed = true;
         self.reset_flag();
-        for n in 0..sprite_height {
+        for n in 0..(sprite_height as usize) {
             let sprite_address = (self.index as usize + n as usize) & RAM_MASK as usize;
             let sprite = self.ram[sprite_address];
             for pixel in 0..8 {
-                let row = x_y_coordinates.1 + n;
-                let col = x_y_coordinates.0 + pixel;
-                if row < SCREEN_HEIGHT && col < SCREEN_WIDTH {
-                    self.display[row as usize][col as usize] ^= ((sprite >> (7 - pixel)) & 1) != 0;
-                    if self.display[row as usize][col as usize] == false {
+                let row = ((x_y_coordinates.1 as usize) % size.height) + n;
+                let col = ((x_y_coordinates.0 as usize) % size.width) + pixel;
+                let offset = col + row * size.width;
+                if row < size.height && col < size.width {
+                    self.display_buffer[offset] ^= ((sprite >> (7 - pixel)) & 1) != 0;
+                    if self.display_buffer[offset] == false {
                         self.set_flag();
                     }
                 }
@@ -379,8 +395,11 @@ impl Chirp8 {
         self.ram[PROGRAM_START..(PROGRAM_START + PROGRAM_SIZE)].copy_from_slice(rom);
     }
 
-    /// Returns a reference to the internal screen buffer.
-    pub fn get_screen(&self) -> &[[bool; SCREEN_WIDTH as usize]; SCREEN_HEIGHT as usize] {
-        &self.display
+    /// Returns a reference to the internal display buffer.
+    /// The buffer has the maximum size the emulator can process, access each element using
+    /// the dimensions given by `get_display_size`.
+    pub fn get_display_buffer(&self) -> &[bool; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT] {
+        // TODO : get rid of the size ambiguity by printing 2*2 square when in cosmac mode
+        &self.display_buffer
     }
 }
