@@ -43,6 +43,14 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+/// Number of CPU steps executed each second.
+pub const STEPS_PER_SECOND: usize = 500;
+/// Refresh rate, number of frames per second.
+/// Also dictates the decrease rate of the emulator's timers.
+const REFRESH_RATE_HZ: usize = 60;
+/// Number of CPU steps executed between two consecutive frames.
+/// Also dictates the number of steps between two timer decreases.
+const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
 /// The display size currently used by the emulator.
 pub struct DisplaySize {
     pub width: usize,
@@ -66,6 +74,8 @@ pub struct Chirp8 {
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT],
 
+    /// Number of cpu steps taken since last timer step.
+    steps_since_timer: usize,
     /// Meta flag to indicate that the display changed.
     display_changed: bool,
     /// Random numbers generator
@@ -92,6 +102,7 @@ impl Chirp8 {
             delay_timer: 0,
             display_changed: false,
             keys: [false; KEYS_COUNT],
+            steps_since_timer: 0,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
         }
     }
@@ -114,6 +125,13 @@ impl Chirp8 {
     pub fn key_set(&mut self, key: usize, value: bool) {
         if key < KEYS_COUNT {
             self.keys[key] = value;
+        }
+    }
+
+    /// Run as many instruction as necessary to generate a frame.
+    pub fn run_frame(&mut self) {
+        for _ in 0..STEPS_PER_FRAME {
+            self.step();
         }
     }
 
@@ -319,6 +337,17 @@ impl Chirp8 {
             }
 
             _ => panic!("Unrecognized instruction {:x}", instruction),
+        }
+        // Handle timers
+        self.steps_since_timer += 1;
+        if self.steps_since_timer == STEPS_PER_FRAME {
+            self.steps_since_timer = 0;
+            if self.delay_timer != 0 {
+                self.delay_timer -= 1;
+            }
+            if self.sound_timer != 0 {
+                self.sound_timer -= 1;
+            }
         }
     }
 
