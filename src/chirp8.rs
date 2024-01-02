@@ -12,7 +12,9 @@ const RAM_MASK: u16 = (RAM_SIZE - 1) as u16;
 const PROGRAM_START: usize = 0x200;
 /// The maximum size a program can use.
 pub const PROGRAM_SIZE: usize = RAM_SIZE - PROGRAM_START;
+/// Maximum display width, used by Super-chip and XO-chip.
 pub const MAX_DISPLAY_WIDTH: usize = 128;
+/// Maximum display height, used by Super-chip and XO-chip.
 pub const MAX_DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
@@ -74,7 +76,7 @@ pub struct DisplaySize {
 pub struct Chirp8 {
     ram: [u8; RAM_SIZE],
     /// Display buffer, true when pixel is on, false otherwise.
-    display_buffer: [bool; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT],
+    display_buffer: [[bool; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT],
     /// V0 to VF.
     registers: [u8; REGISTERS_COUNT],
     /// Program counter.
@@ -108,7 +110,7 @@ impl Chirp8 {
         // Create emulator
         Self {
             ram: ram,
-            display_buffer: [false; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT],
+            display_buffer: [[false; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT],
             registers: [0; REGISTERS_COUNT],
             pc: PROGRAM_START as u16,
             index: 0,
@@ -174,7 +176,11 @@ impl Chirp8 {
         match opcode {
             0x0 => match instruction {
                 // Clear screen
-                0x00E0 => self.display_buffer.fill(false),
+                0x00E0 => {
+                    for row in &mut self.display_buffer {
+                        row.fill(false)
+                    }
+                }
                 // Return from subroutine
                 0x00EE => self.pc = self.stack.pop().ok().unwrap(),
                 _ => panic!("Unrecognized 0 instruction {:x}", instruction),
@@ -400,35 +406,40 @@ impl Chirp8 {
         Option::None
     }
 
-    /// Returns the display size based on the current mode.
-    pub fn get_display_size(&self) -> DisplaySize {
-        match self.mode {
-            Chirp8Mode::CosmacChip8 => DisplaySize {
-                width: 64,
-                height: 32,
-            },
-            Chirp8Mode::SuperChip => DisplaySize {
-                width: 128,
-                height: 64,
-            },
-        }
-    }
-
     /// Display character pointed by index register at given coordinates.
     fn display(&mut self, x_y_coordinates: (u8, u8), sprite_height: u8) {
-        let size = self.get_display_size();
         self.display_changed = true;
         self.reset_flag();
         for n in 0..(sprite_height as usize) {
             let sprite_address = (self.index as usize + n as usize) & RAM_MASK as usize;
             let sprite = self.ram[sprite_address];
             for pixel in 0..8 {
-                let row = ((x_y_coordinates.1 as usize) % size.height) + n;
-                let col = ((x_y_coordinates.0 as usize) % size.width) + pixel;
-                let offset = col + row * size.width;
-                if row < size.height && col < size.width {
-                    self.display_buffer[offset] ^= ((sprite >> (7 - pixel)) & 1) != 0;
-                    if self.display_buffer[offset] == false {
+                let (row, col) = if self.mode == Chirp8Mode::CosmacChip8 {
+                    (
+                        2 * (((x_y_coordinates.1 as usize) + n) % 32),
+                        2 * (((x_y_coordinates.0 as usize) + pixel) % 64),
+                    )
+                } else {
+                    (
+                        ((x_y_coordinates.1 as usize) + n) % 64,
+                        ((x_y_coordinates.0 as usize) + pixel) % 128,
+                    )
+                };
+
+                if row < MAX_DISPLAY_HEIGHT && col < MAX_DISPLAY_WIDTH {
+                    let pixel_xor = ((sprite >> (7 - pixel)) & 1) != 0;
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        // Draw 2x2 "pixels" when on cosmac, to match super-chip display size.
+                        self.display_buffer[row][col] ^= pixel_xor;
+                        let pixel_on = self.display_buffer[row][col];
+                        self.display_buffer[row][col + 1] = pixel_on;
+                        self.display_buffer[row + 1][col] = pixel_on;
+                        self.display_buffer[row + 1][col + 1] = pixel_on;
+                    } else {
+                        self.display_buffer[row][col] ^= pixel_xor;
+                    }
+                    if !self.display_buffer[row][col] {
+                        // TODO : check expected behavior, set when turned off.
                         self.set_flag();
                     }
                 }
@@ -443,21 +454,21 @@ impl Chirp8 {
         result
     }
 
-    pub fn is_beeping(&self) -> bool {
+    /// Indicates whether the sound buzzer is currently on.
+    pub fn is_buzzer_on(&self) -> bool {
         self.sound_timer > 0
     }
 
-    /// Load a game's ROM in memory.
-    /// The ROM may be smaller than array. Pad with any value.
+    /// Load a ROM into memory.
+    /// The ROM may be smaller than array, in that case pad with any value.
     pub fn load_rom(&mut self, rom: &[u8; PROGRAM_SIZE]) {
         self.ram[PROGRAM_START..(PROGRAM_START + PROGRAM_SIZE)].copy_from_slice(rom);
     }
 
     /// Returns a reference to the internal display buffer.
-    /// The buffer has the maximum size the emulator can process, access each element using
-    /// the dimensions given by `get_display_size`.
-    pub fn get_display_buffer(&self) -> &[bool; MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT] {
-        // TODO : get rid of the size ambiguity by printing 2*2 square when in cosmac mode
+    /// Notice that when running on Cosmac mode, each "pixel" is displayed as a 2 by 2 square,
+    /// in order to match the resolution of the Super-Chip mode.
+    pub fn get_display_buffer(&self) -> &[[bool; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT] {
         &self.display_buffer
     }
 }
