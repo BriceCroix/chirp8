@@ -47,10 +47,23 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
 pub const STEPS_PER_SECOND: usize = 500;
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
-const REFRESH_RATE_HZ: usize = 60;
+pub const REFRESH_RATE_HZ: usize = 60;
 /// Number of CPU steps executed between two consecutive frames.
 /// Also dictates the number of steps between two timer decreases.
 const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
+
+/// The mode in which the emulator runs, affects the display size and the
+/// way some instruction are handled.
+#[derive(PartialEq)]
+pub enum Chirp8Mode {
+    /// Original Cosmac VIP chip-8 mode from 1977, uses 128x64 display.
+    CosmacChip8,
+    /// HP48 Super-Chip extension from 1984, uses 128x64 display.
+    SuperChip,
+    // TODO : SuperChipLegacy,
+    // TODO : XOChip,
+}
+
 /// The display size currently used by the emulator.
 pub struct DisplaySize {
     pub width: usize,
@@ -74,6 +87,8 @@ pub struct Chirp8 {
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT],
 
+    /// The current running mode of the emulator.
+    mode: Chirp8Mode,
     /// Number of cpu steps taken since last timer step.
     steps_since_timer: usize,
     /// Meta flag to indicate that the display changed.
@@ -100,9 +115,10 @@ impl Chirp8 {
             stack: Stack::new(),
             sound_timer: 0,
             delay_timer: 0,
-            display_changed: false,
             keys: [false; KEYS_COUNT],
+            mode: Chirp8Mode::CosmacChip8,
             steps_since_timer: 0,
+            display_changed: false,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
         }
     }
@@ -230,7 +246,9 @@ impl Chirp8 {
                 }
                 // Shift VX right
                 0x6 => {
-                    // TODO : enable disable VX = VY (original language)
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        self.registers[x] = self.registers[y];
+                    }
                     self.registers[0xF] = self.registers[x] & 0x1;
                     self.registers[x] >>= 1;
                 }
@@ -245,7 +263,9 @@ impl Chirp8 {
                 }
                 // Shift VX left
                 0xE => {
-                    // TODO : enable disable VX = VY (original language)
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        self.registers[x] = self.registers[y];
+                    }
                     self.registers[0xF] = (self.registers[x] >> 7) & 0x1;
                     self.registers[x] <<= 1;
                 }
@@ -254,8 +274,15 @@ impl Chirp8 {
             // Set index
             0xA => self.index = nnn,
             // Jump with offset
-            // TODO enable configuration of BXNN or BNNN
-            0xB => self.pc = (nnn + self.registers[0] as u16) & RAM_MASK,
+            0xB => {
+                self.pc = (nnn
+                    + self.registers[if self.mode == Chirp8Mode::CosmacChip8 {
+                        0
+                    } else {
+                        x
+                    }] as u16)
+                    & RAM_MASK
+            }
             // Random
             0xC => self.registers[x] = (self.randomizer.next_u32() as u8) & nn,
             // Display
@@ -319,8 +346,9 @@ impl Chirp8 {
                             self.ram[(i + self.index as usize) & RAM_MASK as usize] =
                                 self.registers[i];
                         }
-                        // TODO : enable that for COSMAC VIP
-                        // self.index = (self.index + end_index as u16) & RAM_MASK;
+                        if self.mode == Chirp8Mode::CosmacChip8 {
+                            self.index = (self.index + end_index as u16) & RAM_MASK;
+                        }
                     }
                     // FX65: Load
                     0x65 => {
@@ -329,8 +357,9 @@ impl Chirp8 {
                             self.registers[i] =
                                 self.ram[(i + self.index as usize) & RAM_MASK as usize];
                         }
-                        // TODO : enable that for COSMAC VIP
-                        // self.index = (self.index + end_index as u16) & RAM_MASK;
+                        if self.mode == Chirp8Mode::CosmacChip8 {
+                            self.index = (self.index + end_index as u16) & RAM_MASK;
+                        }
                     }
                     _ => panic!("Unrecognized E instruction {:x}", instruction),
                 }
