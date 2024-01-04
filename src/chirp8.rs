@@ -111,7 +111,8 @@ pub struct Chirp8 {
 }
 
 impl Chirp8 {
-    pub fn new() -> Self {
+    /// Creates a new emulator, which will behave according to given `mode`.
+    pub fn new(mode: Chirp8Mode) -> Self {
         // Load font to RAM
         let mut ram = [0u8; RAM_SIZE];
         const FONT_SPRITES_SIZE: usize = FONT_SPRITES_COUNT * FONT_SPRITES_STEP;
@@ -131,7 +132,7 @@ impl Chirp8 {
             delay_timer: 0,
             keys: [false; KEYS_COUNT],
             high_resolution: false,
-            mode: Chirp8Mode::CosmacChip8,
+            mode: mode,
             steps_since_timer: 0,
             display_changed: false,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),

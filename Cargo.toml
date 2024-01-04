@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 rand = {version = "0.8.5", features = ["small_rng"], default-features = false}
+
+[dev-dependencies]
+bmp = "0.5.0"
