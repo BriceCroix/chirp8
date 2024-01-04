@@ -50,7 +50,7 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
 /// The location in memory of the high-resolution font sprite '0'.
 const FONT_SPRITES_HIGH_ADDRESS: usize = FONT_SPRITES_ADDRESS + FONT_SPRITES.len();
 /// The address step between two consecutive high-resolution font sprites.
-const FONT_SPRITES_HIGH_STEP: usize = 5;
+const FONT_SPRITES_HIGH_STEP: usize = 10;
 /// The font sprites, from '0' to 'F'.
 // const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [];
 
@@ -110,6 +110,12 @@ pub struct Chirp8 {
     randomizer: SmallRng,
 }
 
+impl Default for Chirp8 {
+    fn default() -> Self {
+        Self::new(Chirp8Mode::CosmacChip8)
+    }
+}
+
 impl Chirp8 {
     /// Creates a new emulator, which will behave according to given `mode`.
     pub fn new(mode: Chirp8Mode) -> Self {
@@ -167,11 +173,16 @@ impl Chirp8 {
         }
     }
 
+    fn next_instruction(&self) -> u16 {
+        const BITS_IN_BYTE: u16 = 8;
+        ((self.ram[self.pc as usize] as u16) << BITS_IN_BYTE)
+            + (self.ram[self.pc as usize + 1] as u16)
+    }
+
     /// Execute one machine instruction.
     pub fn step(&mut self) {
         // Big endian instruction
-        let instruction =
-            ((self.ram[self.pc as usize] as u16) << 8) + (self.ram[self.pc as usize + 1] as u16);
+        let instruction = self.next_instruction();
         self.pc = (self.pc + 2) & RAM_MASK;
 
         // See https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
@@ -257,46 +268,51 @@ impl Chirp8 {
                 0x3 => self.registers[x] ^= self.registers[y],
                 // ADD
                 0x4 => {
-                    if self.registers[x].checked_add(self.registers[y]) == Option::None {
-                        self.set_flag();
+                    let flag = if self.registers[x].checked_add(self.registers[y]) == Option::None {
+                        1
                     } else {
-                        self.reset_flag();
-                    }
-                    self.registers[x] = self.registers[x].wrapping_add(self.registers[y])
+                        0
+                    };
+                    self.registers[x] = self.registers[x].wrapping_add(self.registers[y]);
+                    self.registers[0xF] = flag;
                 }
                 // SUB VX - VY
                 0x5 => {
-                    if self.registers[x] > self.registers[y] {
-                        self.set_flag()
+                    let flag = if self.registers[x] >= self.registers[y] {
+                        1
                     } else {
-                        self.reset_flag()
-                    }
-                    self.registers[x] = self.registers[x].wrapping_sub(self.registers[y])
+                        0
+                    };
+                    self.registers[x] = self.registers[x].wrapping_sub(self.registers[y]);
+                    self.registers[0xF] = flag;
                 }
                 // Shift VX right
                 0x6 => {
                     if self.mode == Chirp8Mode::CosmacChip8 {
                         self.registers[x] = self.registers[y];
                     }
-                    self.registers[0xF] = self.registers[x] & 0x1;
+                    let flag = self.registers[x] & 0x1;
                     self.registers[x] >>= 1;
+                    self.registers[0xF] = flag;
                 }
                 // SUB VY - VX
                 0x7 => {
-                    if self.registers[y] > self.registers[x] {
-                        self.set_flag()
+                    let flag = if self.registers[y] >= self.registers[x] {
+                        1
                     } else {
-                        self.reset_flag()
-                    }
-                    self.registers[x] = self.registers[y].wrapping_sub(self.registers[x])
+                        0
+                    };
+                    self.registers[x] = self.registers[y].wrapping_sub(self.registers[x]);
+                    self.registers[0xF] = flag;
                 }
                 // Shift VX left
                 0xE => {
                     if self.mode == Chirp8Mode::CosmacChip8 {
                         self.registers[x] = self.registers[y];
                     }
-                    self.registers[0xF] = (self.registers[x] >> 7) & 0x1;
+                    let flag = (self.registers[x] >> 7) & 0x1;
                     self.registers[x] <<= 1;
+                    self.registers[0xF] = flag;
                 }
                 _ => panic!("Unrecognized logic instruction {:x}", n),
             },
@@ -360,9 +376,8 @@ impl Chirp8 {
                     }
                     // FX30: Large font character (Super-Chip 1.1)
                     0x30 => {
-                        self.index = (FONT_SPRITES_HIGH_ADDRESS as u16
-                            + FONT_SPRITES_HIGH_STEP as u16 * self.registers[x & 0xF] as u16)
-                            & RAM_MASK;
+                        self.index = FONT_SPRITES_HIGH_ADDRESS as u16
+                            + FONT_SPRITES_HIGH_STEP as u16 * self.registers[x & 0xF] as u16;
                     }
 
                     // FX33: Binary-coded decimal conversion
@@ -558,4 +573,19 @@ impl Chirp8 {
     pub fn get_display_buffer(&self) -> &[[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT] {
         &self.display_buffer
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn opcode_6xnn() {
+        let mut emulator = Chirp8::default();
+        emulator.ram[PROGRAM_START..PROGRAM_START + 2].copy_from_slice(&[0x63, 0xAB]);
+        emulator.step();
+
+        assert_eq!(emulator.registers[3], 0xAB);
+    }
+    // TODO : test other opcodes
 }
