@@ -120,11 +120,14 @@ fn quirks_chip_8() {
     let mut chirp8 = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
 
     chirp8.load_rom(&rom);
-    // Force Chip-8 test mode
-    chirp8.key_press(1);
-
-    // Although undocumented, this test has to run for 952 steps to render entirely
-    for _ in 0..5000 {
+    // Force Chip-8 test mode (key 1)
+    let key = 1;
+    chirp8.key_press(key);
+    for _ in 0..1000 {
+        chirp8.step();
+    }
+    chirp8.key_release(key);
+    for _ in 0..3000 {
         chirp8.step();
     }
 
