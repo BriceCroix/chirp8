@@ -1,3 +1,5 @@
+use core::cmp::min;
+
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 
@@ -13,9 +15,9 @@ const PROGRAM_START: usize = 0x200;
 /// The maximum size a program can use.
 pub const PROGRAM_SIZE: usize = RAM_SIZE - PROGRAM_START;
 /// Maximum display width, used by Super-chip and XO-chip.
-pub const MAX_DISPLAY_WIDTH: usize = 128;
+pub const DISPLAY_WIDTH: usize = 128;
 /// Maximum display height, used by Super-chip and XO-chip.
-pub const MAX_DISPLAY_HEIGHT: usize = 64;
+pub const DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
 /// Numbers of keys used by the system.
@@ -45,6 +47,13 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+/// The location in memory of the high-resolution font sprite '0'.
+const FONT_SPRITES_HIGH_ADDRESS: usize = FONT_SPRITES_ADDRESS + FONT_SPRITES.len();
+/// The address step between two consecutive high-resolution font sprites.
+const FONT_SPRITES_HIGH_STEP: usize = 5;
+/// The font sprites, from '0' to 'F'.
+// const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [];
+
 /// Number of CPU steps executed each second.
 pub const STEPS_PER_SECOND: usize = 500;
 /// Refresh rate, number of frames per second.
@@ -58,7 +67,7 @@ const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
 /// way some instruction are handled.
 #[derive(PartialEq)]
 pub enum Chirp8Mode {
-    /// Original Cosmac VIP chip-8 mode from 1977, uses 128x64 display.
+    /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
     /// HP48 Super-Chip extension from 1984, uses 128x64 display.
     SuperChip,
@@ -76,7 +85,7 @@ pub struct DisplaySize {
 pub struct Chirp8 {
     ram: [u8; RAM_SIZE],
     /// Display buffer, true when pixel is on, false otherwise.
-    display_buffer: [[bool; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT],
+    display_buffer: [[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT],
     /// V0 to VF.
     registers: [u8; REGISTERS_COUNT],
     /// Program counter.
@@ -88,6 +97,8 @@ pub struct Chirp8 {
     delay_timer: u8,
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT],
+    /// On Super Chip 8, true when high-resolution is enabled.
+    high_resolution: bool,
 
     /// The current running mode of the emulator.
     mode: Chirp8Mode,
@@ -106,11 +117,12 @@ impl Chirp8 {
         const FONT_SPRITES_SIZE: usize = FONT_SPRITES_COUNT * FONT_SPRITES_STEP;
         ram[FONT_SPRITES_ADDRESS..FONT_SPRITES_ADDRESS + FONT_SPRITES_SIZE]
             .copy_from_slice(&FONT_SPRITES);
+        // TODO copy FONT_HIGH_RES
 
         // Create emulator
         Self {
             ram: ram,
-            display_buffer: [[false; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT],
+            display_buffer: [[false; DISPLAY_WIDTH]; DISPLAY_HEIGHT],
             registers: [0; REGISTERS_COUNT],
             pc: PROGRAM_START as u16,
             index: 0,
@@ -118,6 +130,7 @@ impl Chirp8 {
             sound_timer: 0,
             delay_timer: 0,
             keys: [false; KEYS_COUNT],
+            high_resolution: false,
             mode: Chirp8Mode::CosmacChip8,
             steps_since_timer: 0,
             display_changed: false,
@@ -183,6 +196,15 @@ impl Chirp8 {
                 }
                 // Return from subroutine
                 0x00EE => self.pc = self.stack.pop().ok().unwrap(),
+                // Exit from interpreter (S-Chip) (do nothing here)
+                0x00FD => (),
+                // Disable High-res (S-Chip)
+                0x00FE => self.high_resolution = false,
+                // Enable High-res (S-chip)
+                0x00FF => self.high_resolution = true,
+                // TODO 0x00CN : scroll down n pixels
+                // TODO 0x00FB : scroll right 4 pixels
+                // TODO 0x00CN : scroll left 4 pixels
                 _ => panic!("Unrecognized 0 instruction {:x}", instruction),
             },
             // Jump
@@ -331,8 +353,14 @@ impl Chirp8 {
                     }
                     // FX29: Font character
                     0x29 => {
-                        self.index = (FONT_SPRITES_ADDRESS as u16
-                            + FONT_SPRITES_STEP as u16 * self.registers[x & 0xF] as u16)
+                        // TODO SuperChip1.0 : Point I to 5-byte font sprite as in CHIP-8, but if the high nibble in VX is 1 (ie. for values between 10 and 19 in hex) it will point I to a 10-byte font sprite for the digit in the lower nibble of VX (only digits 0-9)
+                        self.index = FONT_SPRITES_ADDRESS as u16
+                            + FONT_SPRITES_STEP as u16 * self.registers[x & 0xF] as u16;
+                    }
+                    // FX30: Large font character (Super-Chip 1.1)
+                    0x30 => {
+                        self.index = (FONT_SPRITES_HIGH_ADDRESS as u16
+                            + FONT_SPRITES_HIGH_STEP as u16 * self.registers[x & 0xF] as u16)
                             & RAM_MASK;
                     }
 
@@ -352,6 +380,7 @@ impl Chirp8 {
                             self.ram[(i + self.index as usize) & RAM_MASK as usize] =
                                 self.registers[i];
                         }
+                        // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
                         if self.mode == Chirp8Mode::CosmacChip8 {
                             self.index = (self.index + end_index as u16) & RAM_MASK;
                         }
@@ -363,10 +392,15 @@ impl Chirp8 {
                             self.registers[i] =
                                 self.ram[(i + self.index as usize) & RAM_MASK as usize];
                         }
+                        // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
                         if self.mode == Chirp8Mode::CosmacChip8 {
                             self.index = (self.index + end_index as u16) & RAM_MASK;
                         }
                     }
+                    // Save flags registers (Super-Chip)
+                    0x75 => (), //TODO : not supported at the moment
+                    // Load flags registers (Super-Chip)
+                    0x85 => (), //TODO : not supported at the moment
                     _ => panic!("Unrecognized E instruction {:x}", instruction),
                 }
             }
@@ -406,40 +440,92 @@ impl Chirp8 {
         Option::None
     }
 
-    /// Display character pointed by index register at given coordinates.
-    fn display(&mut self, x_y_coordinates: (u8, u8), sprite_height: u8) {
+    /// Display `height`-pixel tall sprite pointed by index register at given `x_y_coordinates`.
+    /// If `height` is 0 then a large 16x16 sprite is used.
+    fn display(&mut self, x_y_coordinates: (u8, u8), height: u8) {
         self.display_changed = true;
         self.reset_flag();
-        for n in 0..(sprite_height as usize) {
-            let sprite_address = (self.index as usize + n as usize) & RAM_MASK as usize;
-            let sprite = self.ram[sprite_address];
-            for pixel in 0..8 {
-                let (row, col) = if self.mode == Chirp8Mode::CosmacChip8 {
-                    (
-                        2 * (((x_y_coordinates.1 as usize) + n) % 32),
-                        2 * (((x_y_coordinates.0 as usize) + pixel) % 64),
-                    )
-                } else {
-                    (
-                        ((x_y_coordinates.1 as usize) + n) % 64,
-                        ((x_y_coordinates.0 as usize) + pixel) % 128,
-                    )
-                };
+        /// Bits in a byte.
+        const BITS: usize = 8;
 
-                if row < MAX_DISPLAY_HEIGHT && col < MAX_DISPLAY_WIDTH {
-                    let pixel_xor = ((sprite >> (7 - pixel)) & 1) != 0;
-                    if self.mode == Chirp8Mode::CosmacChip8 {
-                        // Draw 2x2 "pixels" when on cosmac, to match super-chip display size.
-                        self.display_buffer[row][col] ^= pixel_xor;
-                        let pixel_on = self.display_buffer[row][col];
-                        self.display_buffer[row][col + 1] = pixel_on;
-                        self.display_buffer[row + 1][col] = pixel_on;
-                        self.display_buffer[row + 1][col + 1] = pixel_on;
-                    } else {
-                        self.display_buffer[row][col] ^= pixel_xor;
+        let high_resolution = self.mode == Chirp8Mode::SuperChip && self.high_resolution;
+
+        if high_resolution && height == 0 {
+            // Handle instruction DXY0 : display 16x16 sprite
+
+            /// Width and Height of large sprites.
+            const LARGE_SPRITE_SIZE: usize = 16;
+            /// Bytes per line for large sprites.
+            const BYTES_PER_LINE: usize = 2;
+
+            let actual_height = min(
+                LARGE_SPRITE_SIZE,
+                DISPLAY_HEIGHT - x_y_coordinates.1 as usize,
+            );
+            let actual_width = min(
+                LARGE_SPRITE_SIZE,
+                DISPLAY_WIDTH - x_y_coordinates.0 as usize,
+            );
+
+            for line in 0..actual_height {
+                for part in 0..BYTES_PER_LINE {
+                    let sprite_address =
+                        (self.index as usize + BYTES_PER_LINE * line + part) & RAM_MASK as usize;
+                    let sprite = self.ram[sprite_address];
+                    let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
+                    for bit in 0..(min(BITS, actual_width - part * BITS)) {
+                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
+                            + part * BYTES_PER_LINE
+                            + bit;
+
+                        // Should the pixel be flipped or not.
+                        let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
+
+                        let pixel = &mut self.display_buffer[row][col];
+                        let pixel_before = *pixel;
+                        *pixel ^= pixel_xor;
+                        // Set flag when turned off
+                        if pixel_before && !*pixel {
+                            self.set_flag();
+                        }
                     }
-                    if !self.display_buffer[row][col] {
-                        // TODO : check expected behavior, set when turned off.
+                }
+            }
+        } else {
+            // Handle instruction DXYN : display 8xN sprite
+
+            // Maximum input coordinates
+            let (max_width, max_height, coordinates_scaler) = if high_resolution {
+                (DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
+            } else {
+                (DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 2)
+            };
+
+            let actual_height = min(height, (max_height as u8) - x_y_coordinates.1) as usize;
+            let actual_width = min(BITS as u8, (max_width as u8) - x_y_coordinates.0) as usize;
+
+            for line in 0..actual_height {
+                let sprite_address = ((self.index + line as u16) & RAM_MASK) as usize;
+                let sprite = self.ram[sprite_address];
+                let row = ((x_y_coordinates.1 as usize % max_height) + line) * coordinates_scaler;
+                for bit in 0..actual_width {
+                    let col = (x_y_coordinates.0 as usize % max_width + bit) * coordinates_scaler;
+
+                    // Should the pixel be flipped or not.
+                    let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
+
+                    let pixel_before = self.display_buffer[row][col];
+                    let mut pixel = pixel_before;
+                    pixel ^= pixel_xor;
+                    self.display_buffer[row][col] = pixel;
+                    if !high_resolution {
+                        // Draw 2x2 "pixels" when on low resolution
+                        self.display_buffer[row][col + 1] = pixel;
+                        self.display_buffer[row + 1][col] = pixel;
+                        self.display_buffer[row + 1][col + 1] = pixel;
+                    }
+                    // Set flag when turned off
+                    if pixel_before && !pixel {
                         self.set_flag();
                     }
                 }
@@ -468,7 +554,7 @@ impl Chirp8 {
     /// Returns a reference to the internal display buffer.
     /// Notice that when running on Cosmac mode, each "pixel" is displayed as a 2 by 2 square,
     /// in order to match the resolution of the Super-Chip mode.
-    pub fn get_display_buffer(&self) -> &[[bool; MAX_DISPLAY_WIDTH]; MAX_DISPLAY_HEIGHT] {
+    pub fn get_display_buffer(&self) -> &[[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT] {
         &self.display_buffer
     }
 }
