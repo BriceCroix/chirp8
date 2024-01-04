@@ -159,10 +159,10 @@ impl Chirp8 {
         }
     }
 
-    /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included. `value` is true when pressed, false when released.
-    pub fn key_set(&mut self, key: usize, value: bool) {
+    /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included. `pressed` is true when pressed, false when released.
+    pub fn key_set(&mut self, key: usize, pressed: bool) {
         if key < KEYS_COUNT {
-            self.keys[key] = value;
+            self.keys[key] = pressed;
         }
     }
 
@@ -242,14 +242,14 @@ impl Chirp8 {
             0x5 => {
                 // n should be equal to 0 (0x5XY0), not checked for performance.
                 if self.registers[x] == self.registers[y] {
-                    self.pc += 2;
+                    self.pc = (self.pc + 2) & RAM_MASK;
                 }
             }
             // Skip
             0x9 => {
                 // n should be equal to 0 (0x9XY0), not checked for performance.
                 if self.registers[x] != self.registers[y] {
-                    self.pc += 2;
+                    self.pc = (self.pc + 2) & RAM_MASK
                 }
             }
             // Set register
@@ -334,13 +334,17 @@ impl Chirp8 {
             0xD => self.display((self.registers[x], self.registers[y]), n),
             // Skip if key
             0xE => match nn {
+                // Skip if VX pressed
                 0x9E => {
-                    if self.keys[(0xF & self.registers[x]) as usize] {
+                    let key = (0xF & self.registers[x]) as usize;
+                    if self.keys[key] {
                         self.pc = (self.pc + 2) & RAM_MASK;
                     }
                 }
+                // Skip if VX not pressed
                 0xA1 => {
-                    if !self.keys[(0xF & self.registers[x]) as usize] {
+                    let key = (0xF & self.registers[x]) as usize;
+                    if !self.keys[key] {
                         self.pc = (self.pc + 2) & RAM_MASK;
                     }
                 }
@@ -476,11 +480,11 @@ impl Chirp8 {
 
             let actual_height = min(
                 LARGE_SPRITE_SIZE,
-                DISPLAY_HEIGHT - x_y_coordinates.1 as usize,
+                DISPLAY_HEIGHT.saturating_sub(x_y_coordinates.1 as usize),
             );
             let actual_width = min(
                 LARGE_SPRITE_SIZE,
-                DISPLAY_WIDTH - x_y_coordinates.0 as usize,
+                DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
             );
 
             for line in 0..actual_height {
@@ -517,15 +521,24 @@ impl Chirp8 {
                 (DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 2)
             };
 
-            let actual_height = min(height, (max_height as u8) - x_y_coordinates.1) as usize;
-            let actual_width = min(BITS as u8, (max_width as u8) - x_y_coordinates.0) as usize;
+            let x_y_coordinates = (
+                x_y_coordinates.0 % max_width as u8,
+                x_y_coordinates.1 % max_height as u8,
+            );
+
+            let actual_height =
+                min(height, (max_height as u8).saturating_sub(x_y_coordinates.1)) as usize;
+            let actual_width = min(
+                BITS as u8,
+                (max_width as u8).saturating_sub(x_y_coordinates.0),
+            ) as usize;
 
             for line in 0..actual_height {
                 let sprite_address = ((self.index + line as u16) & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
-                let row = ((x_y_coordinates.1 as usize % max_height) + line) * coordinates_scaler;
+                let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
                 for bit in 0..actual_width {
-                    let col = (x_y_coordinates.0 as usize % max_width + bit) * coordinates_scaler;
+                    let col = (x_y_coordinates.0 as usize + bit) * coordinates_scaler;
 
                     // Should the pixel be flipped or not.
                     let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
@@ -580,12 +593,50 @@ mod test {
     use super::*;
 
     #[test]
-    fn opcode_6xnn() {
+    fn opcode_set_vx_nn() {
         let mut emulator = Chirp8::default();
         emulator.ram[PROGRAM_START..PROGRAM_START + 2].copy_from_slice(&[0x63, 0xAB]);
         emulator.step();
 
         assert_eq!(emulator.registers[3], 0xAB);
+    }
+
+    #[test]
+    fn opcode_skip_if_key_pressed() {
+        let mut emulator = Chirp8::default();
+        emulator.ram[PROGRAM_START..PROGRAM_START + 2].copy_from_slice(&[0xE2, 0x9E]);
+        emulator.registers[2] = 11;
+
+        emulator.key_release(11);
+        let pc_before = emulator.pc;
+        emulator.step();
+        assert_eq!(emulator.pc, pc_before + 2);
+
+        emulator.pc = PROGRAM_START as u16;
+
+        emulator.key_press(11);
+        let pc_before = emulator.pc;
+        emulator.step();
+        assert_eq!(emulator.pc, pc_before + 4);
+    }
+
+    #[test]
+    fn opcode_skip_if_key_not_pressed() {
+        let mut emulator = Chirp8::default();
+        emulator.ram[PROGRAM_START..PROGRAM_START + 2].copy_from_slice(&[0xE2, 0xA1]);
+        emulator.registers[2] = 11;
+
+        emulator.key_release(11);
+        let pc_before = emulator.pc;
+        emulator.step();
+        assert_eq!(emulator.pc, pc_before + 4);
+
+        emulator.pc = PROGRAM_START as u16;
+
+        emulator.key_press(11);
+        let pc_before = emulator.pc;
+        emulator.step();
+        assert_eq!(emulator.pc, pc_before + 2);
     }
     // TODO : test other opcodes
 }
