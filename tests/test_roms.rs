@@ -1,5 +1,19 @@
 use chirp8;
 
+fn _print_display(buffer: &[[bool; chirp8::DISPLAY_WIDTH]; chirp8::DISPLAY_HEIGHT]) {
+    for row in buffer {
+        for pixel in row {
+            if *pixel {
+                print!("\u{25A0}");
+            } else {
+                print!("-");
+            }
+        }
+
+        println!();
+    }
+}
+
 #[test]
 fn ibm_logo() {
     // Statically load test rom.
@@ -114,7 +128,7 @@ fn quirks_chip_8() {
     rom[..rom_file.len()].copy_from_slice(rom_file);
 
     // Statically load expected display at end of test rom.
-    let image = bmp::open("tests/quirks.bmp").unwrap();
+    let image = bmp::open("tests/quirks_chip8.bmp").unwrap();
 
     // Create and run emulator
     let mut chirp8 = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
@@ -132,6 +146,49 @@ fn quirks_chip_8() {
     }
 
     let display = chirp8.get_display_buffer();
+    for i in 0..64 {
+        for j in 0..128 {
+            assert_eq!(display[i][j], image.get_pixel(j as u32, i as u32).r != 0);
+        }
+    }
+}
+
+#[test]
+fn quirks_super_chip() {
+    // Statically load test rom.
+    let rom_file = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
+    let mut rom = [0; chirp8::PROGRAM_SIZE];
+    rom[..rom_file.len()].copy_from_slice(rom_file);
+
+    // Statically load expected display at end of test rom.
+    let image = bmp::open("tests/quirks_super_chip_modern.bmp").unwrap();
+
+    // Create and run emulator
+    let mut chirp8 = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChip);
+
+    chirp8.load_rom(&rom);
+    // Force super chip test mode
+    let key = 2;
+    chirp8.key_press(key);
+    for _ in 0..1000 {
+        chirp8.step();
+    }
+    chirp8.key_release(key);
+    for _ in 0..1000 {
+        chirp8.step();
+    }
+    let key = 1; // Modern mode
+    chirp8.key_press(1);
+    for _ in 0..1000 {
+        chirp8.step();
+    }
+    chirp8.key_release(key);
+    for _ in 0..(3000 + 8000) {
+        chirp8.step();
+    }
+
+    let display = chirp8.get_display_buffer();
+    //_print_display(display);
     for i in 0..64 {
         for j in 0..128 {
             assert_eq!(display[i][j], image.get_pixel(j as u32, i as u32).r != 0);
