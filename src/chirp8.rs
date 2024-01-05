@@ -72,7 +72,7 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
 ];
 
 /// Number of CPU steps executed each second.
-pub const STEPS_PER_SECOND: usize = 500;
+pub const STEPS_PER_SECOND: usize = 600;
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
 pub const REFRESH_RATE_HZ: usize = 60;
@@ -280,11 +280,26 @@ impl Chirp8 {
                 // Set
                 0x0 => self.registers[x] = self.registers[y],
                 // OR
-                0x1 => self.registers[x] |= self.registers[y],
+                0x1 => {
+                    self.registers[x] |= self.registers[y];
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        self.reset_flag();
+                    }
+                }
                 // AND
-                0x2 => self.registers[x] &= self.registers[y],
+                0x2 => {
+                    self.registers[x] &= self.registers[y];
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        self.reset_flag();
+                    }
+                }
                 // XOR
-                0x3 => self.registers[x] ^= self.registers[y],
+                0x3 => {
+                    self.registers[x] ^= self.registers[y];
+                    if self.mode == Chirp8Mode::CosmacChip8 {
+                        self.reset_flag();
+                    }
+                }
                 // ADD
                 0x4 => {
                     let flag = if self.registers[x].checked_add(self.registers[y]) == Option::None {
@@ -350,7 +365,10 @@ impl Chirp8 {
             // Random
             0xC => self.registers[x] = (self.randomizer.next_u32() as u8) & nn,
             // Display
-            0xD => self.display((self.registers[x], self.registers[y]), n),
+            0xD => {
+                self.handle_display_wait();
+                self.display((self.registers[x], self.registers[y]), n)
+            }
             // Skip if key
             0xE => match nn {
                 // Skip if VX pressed
@@ -479,6 +497,25 @@ impl Chirp8 {
         Option::None
     }
 
+    /// Handle the *display wait quirk* before displaying anything.
+    /// - The Cosmac chip-8 waits the display interrupt before displaying.
+    /// - The original Super chip (legacy) waits but only in low-resolution.
+    /// - The *modern* Super chip never waits.
+    /// This method implements the original cosmac and the "modern" super-chip behaviors.
+    fn handle_display_wait(&mut self) {
+        //https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
+
+        if self.mode == Chirp8Mode::CosmacChip8 {
+            // Wait for next frame, but instead of waiting, shortcut time.
+            // The other option is to decrement pc if steps_since_frame is not 0,
+            // But that messes with the number of steps required to do something,
+            // as 10 steps would be necessary to only execute a draw.
+            while self.steps_since_frame != 0 {
+                self.step_timers();
+            }
+        }
+    }
+
     /// Display `height`-pixel tall sprite pointed by index register at given `x_y_coordinates`.
     /// If `height` is 0 then a large 16x16 sprite is used.
     fn display(&mut self, x_y_coordinates: (u8, u8), height: u8) {
@@ -522,7 +559,7 @@ impl Chirp8 {
                         let pixel_before = *pixel;
                         *pixel ^= pixel_xor;
                         // Set flag when turned off
-                        if pixel_before && !*pixel {
+                        if pixel_before && !(*pixel) {
                             self.set_flag();
                         }
                     }
@@ -654,6 +691,31 @@ mod test {
         let pc_before = emulator.pc;
         emulator.step();
         assert_eq!(emulator.pc, pc_before + 2);
+    }
+
+    #[test]
+    fn opcode_draw_high_res() {
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + 5].copy_from_slice(&[
+            0x00, 0xFF, // Enable High-res
+            0xD0, 0x11, // Draw v0 v1 1
+            0x80, // Sprite with one pixel to the left
+        ]);
+        emulator.registers[0] = 67;
+        emulator.registers[1] = 45;
+        emulator.index = PROGRAM_START as u16 + 4;
+
+        emulator.step();
+        emulator.step();
+
+        assert_eq!(emulator.get_display_buffer()[45][67], true);
+        assert_eq!(emulator.registers[0xF], 0);
+
+        emulator.pc -= 2;
+        emulator.step();
+
+        assert_eq!(emulator.get_display_buffer()[45][67], false);
+        assert_eq!(emulator.registers[0xF], 1);
     }
     // TODO : test other opcodes
 }
