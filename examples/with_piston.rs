@@ -1,4 +1,4 @@
-use chirp8::{Chirp8, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use chirp8::{Chirp8, Chirp8Mode, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use graphics::types::Color;
 use opengl_graphics::OpenGL;
 use piston::input::{UpdateArgs, UpdateEvent};
@@ -6,8 +6,6 @@ use piston::window::WindowSettings;
 use piston::{Button, Event, EventLoop, Key, PressEvent, ReleaseEvent};
 use piston_window::PistonWindow as Window;
 
-const WIDTH: usize = 128;
-const HEIGHT: usize = 72;
 const PIXELS_PER_CELL: usize = 10;
 
 pub struct App {
@@ -17,13 +15,18 @@ pub struct App {
 }
 
 impl App {
-    fn new(rom: &[u8; chirp8::PROGRAM_SIZE]) -> App {
-        let window: Window = WindowSettings::new(
+    fn new(rom: &[u8; chirp8::PROGRAM_SIZE], mode: chirp8::Chirp8Mode) -> App {
+        const WIDTH: u32 = (chirp8::DISPLAY_WIDTH * PIXELS_PER_CELL) as u32;
+        const HEIGHT: u32 = (chirp8::DISPLAY_HEIGHT * PIXELS_PER_CELL) as u32;
+
+        /// DIRTY FIX : for some reason Piston creates a window too large by these values,
+        /// This does not depend on the WIDTH and HEIGHT, this is a constant error.
+        const WINDOW_WIDTH_ERROR: u32 = 20;
+        const WINDOW_HEIGHT_ERROR: u32 = 55;
+
+        let window = WindowSettings::new(
             "Chirp 8",
-            [
-                (WIDTH * PIXELS_PER_CELL) as u32,
-                (HEIGHT * PIXELS_PER_CELL) as u32,
-            ],
+            [WIDTH - WINDOW_WIDTH_ERROR, HEIGHT - WINDOW_HEIGHT_ERROR],
         )
         .graphics_api(OpenGL::V3_2)
         .exit_on_esc(true)
@@ -32,9 +35,9 @@ impl App {
         .unwrap();
 
         let mut app = Self {
-            emulator: Chirp8::new(chirp8::Chirp8Mode::CosmacChip8),
+            emulator: Chirp8::new(mode),
             window: window,
-            paused: true,
+            paused: false,
         };
         app.emulator.load_rom(rom);
         app
@@ -137,7 +140,7 @@ fn main() {
     rom[..rom_file.len()].copy_from_slice(rom_file);
 
     // Create a new game and run it.
-    let mut app = App::new(&rom);
+    let mut app = App::new(&rom, Chirp8Mode::SuperChip);
 
     app.run();
 }

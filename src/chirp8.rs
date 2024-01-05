@@ -158,7 +158,7 @@ impl Chirp8 {
             high_resolution: false,
             mode: mode,
             steps_since_frame: 0,
-            display_changed: false,
+            display_changed: true,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
         }
     }
