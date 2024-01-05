@@ -51,8 +51,25 @@ const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
 const FONT_SPRITES_HIGH_ADDRESS: usize = FONT_SPRITES_ADDRESS + FONT_SPRITES.len();
 /// The address step between two consecutive high-resolution font sprites.
 const FONT_SPRITES_HIGH_STEP: usize = 10;
-/// The font sprites, from '0' to 'F'.
-// const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [];
+/// The high-resolution font sprites, from '0' to 'F' (only 0-9 are present in original interpreter).
+const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
+    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, // 0
+    0x18, 0x38, 0x58, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, // 1
+    0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xFF, 0xFF, // 2
+    0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, // 3
+    0x06, 0x0E, 0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, // 4
+    0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE, 0x03, 0xC3, 0x7E, 0x3C, // 5
+    0x3E, 0x7C, 0xC0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C, // 6
+    0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, // 7
+    0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, // 8
+    0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C, // 9
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // A (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // B (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // C (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // D (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // E (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // F (absent)
+];
 
 /// Number of CPU steps executed each second.
 pub const STEPS_PER_SECOND: usize = 500;
@@ -69,9 +86,8 @@ const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
-    /// HP48 Super-Chip extension from 1984, uses 128x64 display.
+    /// HP48 Super-Chip 1.1 extension from 1984, uses 128x64 display.
     SuperChip,
-    // TODO : SuperChipLegacy,
     // TODO : XOChip,
 }
 
@@ -124,7 +140,9 @@ impl Chirp8 {
         const FONT_SPRITES_SIZE: usize = FONT_SPRITES_COUNT * FONT_SPRITES_STEP;
         ram[FONT_SPRITES_ADDRESS..FONT_SPRITES_ADDRESS + FONT_SPRITES_SIZE]
             .copy_from_slice(&FONT_SPRITES);
-        // TODO copy FONT_HIGH_RES
+        const FONT_SPRITES_HIGH_SIZE: usize = FONT_SPRITES_COUNT * FONT_SPRITES_HIGH_STEP;
+        ram[FONT_SPRITES_HIGH_ADDRESS..FONT_SPRITES_HIGH_ADDRESS + FONT_SPRITES_HIGH_SIZE]
+            .copy_from_slice(&FONT_SPRITES_HIGH);
 
         // Create emulator
         Self {
@@ -494,9 +512,7 @@ impl Chirp8 {
                     let sprite = self.ram[sprite_address];
                     let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
                     for bit in 0..(min(BITS, actual_width - part * BITS)) {
-                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
-                            + part * BYTES_PER_LINE
-                            + bit;
+                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH + part * BITS + bit;
 
                         // Should the pixel be flipped or not.
                         let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
