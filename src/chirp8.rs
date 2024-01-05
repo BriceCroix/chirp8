@@ -119,7 +119,7 @@ pub struct Chirp8 {
     /// The current running mode of the emulator.
     mode: Chirp8Mode,
     /// Number of cpu steps taken since last timer step.
-    steps_since_timer: usize,
+    steps_since_frame: usize,
     /// Meta flag to indicate that the display changed.
     display_changed: bool,
     /// Random numbers generator
@@ -157,7 +157,7 @@ impl Chirp8 {
             keys: [false; KEYS_COUNT],
             high_resolution: false,
             mode: mode,
-            steps_since_timer: 0,
+            steps_since_frame: 0,
             display_changed: false,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
         }
@@ -199,9 +199,10 @@ impl Chirp8 {
 
     /// Execute one machine instruction.
     pub fn step(&mut self) {
+        const PROGRAM_COUNTER_STEP: u16 = 2;
         // Big endian instruction
         let instruction = self.next_instruction();
-        self.pc = (self.pc + 2) & RAM_MASK;
+        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
 
         // See https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
         let opcode = 0xF & (instruction >> 12) as u8;
@@ -247,27 +248,27 @@ impl Chirp8 {
             // Skip
             0x3 => {
                 if self.registers[x] == nn {
-                    self.pc = (self.pc + 2) & RAM_MASK;
+                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x4 => {
                 if self.registers[x] != nn {
-                    self.pc = (self.pc + 2) & RAM_MASK;
+                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x5 => {
                 // n should be equal to 0 (0x5XY0), not checked for performance.
                 if self.registers[x] == self.registers[y] {
-                    self.pc = (self.pc + 2) & RAM_MASK;
+                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x9 => {
                 // n should be equal to 0 (0x9XY0), not checked for performance.
                 if self.registers[x] != self.registers[y] {
-                    self.pc = (self.pc + 2) & RAM_MASK
+                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK
                 }
             }
             // Set register
@@ -356,14 +357,14 @@ impl Chirp8 {
                 0x9E => {
                     let key = (0xF & self.registers[x]) as usize;
                     if self.keys[key] {
-                        self.pc = (self.pc + 2) & RAM_MASK;
+                        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
                     }
                 }
                 // Skip if VX not pressed
                 0xA1 => {
                     let key = (0xF & self.registers[x]) as usize;
                     if !self.keys[key] {
-                        self.pc = (self.pc + 2) & RAM_MASK;
+                        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
                     }
                 }
                 _ => panic!("Unrecognized E instruction {:x}", instruction),
@@ -446,15 +447,15 @@ impl Chirp8 {
             _ => panic!("Unrecognized instruction {:x}", instruction),
         }
         // Handle timers
-        self.steps_since_timer += 1;
-        if self.steps_since_timer == STEPS_PER_FRAME {
-            self.steps_since_timer = 0;
-            if self.delay_timer != 0 {
-                self.delay_timer -= 1;
-            }
-            if self.sound_timer != 0 {
-                self.sound_timer -= 1;
-            }
+        self.step_timers();
+    }
+
+    fn step_timers(&mut self) {
+        self.steps_since_frame += 1;
+        if self.steps_since_frame == STEPS_PER_FRAME {
+            self.steps_since_frame = 0;
+            self.delay_timer = self.delay_timer.saturating_sub(1);
+            self.sound_timer = self.sound_timer.saturating_sub(1);
         }
     }
 
