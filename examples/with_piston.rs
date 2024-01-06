@@ -144,6 +144,7 @@ impl App {
     }
 }
 
+/// Read given file path as bytes.
 fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
     // Attempt to open the file
     let mut file = std::fs::File::open(file_path)?;
@@ -159,6 +160,34 @@ fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
     Ok(buffer)
 }
 
+/// Function to parse program options
+fn parse_arguments(args: &std::vec::Vec<String>) -> chirp8::Chirp8Mode {
+    let mut opts = getopts::Options::new();
+
+    opts.optflag("c", "chip", "Use original Chip-8");
+    opts.optflag("s", "super-chip", "Use Super Chip 1.1");
+    opts.optflag("m", "modern-super-chip", "Use Modernized Super Chip");
+
+    // Parse options
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(f) => {
+            eprintln!("Error parsing options: {}", f);
+            std::process::exit(1);
+        }
+    };
+
+    if matches.opt_present("c") {
+        Chirp8Mode::CosmacChip8
+    } else if matches.opt_present("s") {
+        Chirp8Mode::SuperChip1_1
+    } else if matches.opt_present("m") {
+        Chirp8Mode::SuperChipModern
+    } else {
+        Chirp8Mode::CosmacChip8
+    }
+}
+
 fn main() {
     // Get the command-line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -169,13 +198,15 @@ fn main() {
         return;
     }
 
+    let mode = parse_arguments(&args);
+
     // Use the first argument as the rom file path
     let file_path = &args[1];
 
     match read_file_bytes(file_path) {
         Ok(rom) => {
             // Create a new app and run it.
-            let mut app = App::new(rom.as_slice(), Chirp8Mode::SuperChipModern);
+            let mut app = App::new(rom.as_slice(), mode);
             app.run();
         }
         Err(err) => eprintln!("Error reading file: {}", err),
