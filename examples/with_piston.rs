@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use chirp8::{Chirp8, Chirp8Mode, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use graphics::types::Color;
 use opengl_graphics::OpenGL;
@@ -142,11 +144,40 @@ impl App {
     }
 }
 
+fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
+    // Attempt to open the file
+    let mut file = std::fs::File::open(file_path)?;
+
+    // Get the metadata to determine the file size
+    let metadata = file.metadata()?;
+    let file_size = metadata.len() as usize;
+
+    // Read the file contents into a Vec<u8>
+    let mut buffer = Vec::with_capacity(file_size);
+    file.read_to_end(&mut buffer)?;
+
+    Ok(buffer)
+}
+
 fn main() {
-    let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
+    // Get the command-line arguments
+    let args: Vec<String> = std::env::args().collect();
 
-    // Create a new game and run it.
-    let mut app = App::new(rom, Chirp8Mode::SuperChipModern);
+    // Check if at least one argument (the program name) is provided
+    if args.len() < 2 {
+        eprintln!("Usage: {} <file_path>", args[0]);
+        return;
+    }
 
-    app.run();
+    // Use the first argument as the rom file path
+    let file_path = &args[1];
+
+    match read_file_bytes(file_path) {
+        Ok(rom) => {
+            // Create a new app and run it.
+            let mut app = App::new(rom.as_slice(), Chirp8Mode::SuperChipModern);
+            app.run();
+        }
+        Err(err) => eprintln!("Error reading file: {}", err),
+    }
 }
