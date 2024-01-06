@@ -79,6 +79,8 @@ pub const REFRESH_RATE_HZ: usize = 60;
 /// Number of CPU steps executed between two consecutive frames.
 /// Also dictates the number of steps between two timer decreases.
 const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
+/// Number of RPL flags registers on the HP48.
+const RPL_REGISTERS_COUNT: usize = 8;
 
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
@@ -97,12 +99,6 @@ pub enum Chirp8Mode {
     // TODO SuperChip1_0
 }
 
-/// The display size currently used by the emulator.
-pub struct DisplaySize {
-    pub width: usize,
-    pub height: usize,
-}
-
 /// Chip-8 Emulator.
 pub struct Chirp8 {
     ram: [u8; RAM_SIZE],
@@ -117,6 +113,9 @@ pub struct Chirp8 {
     stack: Stack<u16, STACK_SIZE>,
     sound_timer: u8,
     delay_timer: u8,
+    /// Persistent RPL flags registers.
+    rpl_registers: [u8; RPL_REGISTERS_COUNT],
+
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT as usize],
     /// On Super Chip 8, true when high-resolution is enabled.
@@ -160,6 +159,7 @@ impl Chirp8 {
             stack: Stack::new(),
             sound_timer: 0,
             delay_timer: 0,
+            rpl_registers: [0; RPL_REGISTERS_COUNT],
             keys: [false; KEYS_COUNT as usize],
             high_resolution: false,
             mode: mode,
@@ -485,10 +485,16 @@ impl Chirp8 {
                             self.index = (self.index + end_index as u16) & RAM_MASK;
                         }
                     }
-                    // Save flags registers (Super-Chip)
-                    0x75 => (), //TODO : not supported at the moment
-                    // Load flags registers (Super-Chip)
-                    0x85 => (), //TODO : not supported at the moment
+                    // FX75 : Save to flags registers (Super-Chip 1.0 and above)
+                    0x75 => {
+                        let count = x & 0x7;
+                        self.rpl_registers[0..count].copy_from_slice(&self.registers[0..count]);
+                    }
+                    // FX85 : Load from flags registers (Super-Chip 1.0 and above)
+                    0x85 => {
+                        let count = x & 0x7;
+                        self.registers[0..count].copy_from_slice(&self.rpl_registers[0..count]);
+                    }
                     _ => panic!("Unrecognized E instruction {:x}", instruction),
                 }
             }
@@ -726,6 +732,16 @@ impl Chirp8 {
     /// Load a ROM into memory. The ROM must be smaller than `PROGRAM_SIZE`.
     pub fn load_rom(&mut self, rom: &[u8]) {
         self.ram[PROGRAM_START..(PROGRAM_START + rom.len())].copy_from_slice(rom);
+    }
+
+    /// Load given data into persistent RPL registers.
+    pub fn load_rpl_registers(&mut self, registers: &[u8; RPL_REGISTERS_COUNT]) {
+        self.rpl_registers.copy_from_slice(registers);
+    }
+
+    /// Get persistent RPL registers.
+    pub fn get_rpl_registers(&self) -> &[u8; RPL_REGISTERS_COUNT] {
+        &self.rpl_registers
     }
 
     /// Returns a reference to the internal display buffer.
