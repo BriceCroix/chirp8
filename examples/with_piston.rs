@@ -146,7 +146,7 @@ fn main() {
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
 
     // Create a new game and run it.
-    let mut app = App::new(rom, Chirp8Mode::SuperChip);
+    let mut app = App::new(rom, Chirp8Mode::SuperChipModern);
 
     app.run();
 }

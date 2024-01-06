@@ -21,7 +21,7 @@ pub const DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
 /// Numbers of keys used by the system.
-const KEYS_COUNT: usize = 16;
+const KEYS_COUNT: u8 = 16;
 /// The location in memory of the font sprite '0'.
 const FONT_SPRITES_ADDRESS: usize = 0;
 /// The address step between two consecutive font sprites.
@@ -86,11 +86,15 @@ const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
-    /// HP48 Super-Chip 1.1 extension from 1991, uses 128x64 display.
-    /// Does not feature the display wait quirk, like "modern" interpreters do.
-    /// The Super-Chip 1.1 would feature the display wait but only in low-resolution.
-    SuperChip,
+    /// Modernized HP48 Super-Chip 1.1 extension from 1991, uses 128x64 display.
+    /// Like "modern" interpreters, does not feature the "display wait" quirk,
+    /// where the Super-Chip 1.1 would feature the display wait but only in low-resolution.
+    /// Does not feature the "half scroll" quirk as well, where the original interpreter would
+    /// allow to scroll half pixels when in low-resolution.
+    SuperChipModern,
     // TODO : XOChip,
+    // TODO SuperChip1_1
+    // TODO SuperChip1_0
 }
 
 /// The display size currently used by the emulator.
@@ -114,7 +118,7 @@ pub struct Chirp8 {
     sound_timer: u8,
     delay_timer: u8,
     /// Each key is set to true whe pressed and false when released.
-    keys: [bool; KEYS_COUNT],
+    keys: [bool; KEYS_COUNT as usize],
     /// On Super Chip 8, true when high-resolution is enabled.
     high_resolution: bool,
 
@@ -156,7 +160,7 @@ impl Chirp8 {
             stack: Stack::new(),
             sound_timer: 0,
             delay_timer: 0,
-            keys: [false; KEYS_COUNT],
+            keys: [false; KEYS_COUNT as usize],
             high_resolution: false,
             mode: mode,
             steps_since_frame: 0,
@@ -166,24 +170,24 @@ impl Chirp8 {
     }
 
     /// Press the given `key` on the key-pad, between 0 and 15 included.
-    pub fn key_press(&mut self, key: usize) {
+    pub fn key_press(&mut self, key: u8) {
         if key < KEYS_COUNT {
-            self.keys[key] = true;
+            self.keys[key as usize] = true;
         }
     }
 
     /// Release the given `key` on the key-pad, between 0 and 15 included.
-    pub fn key_release(&mut self, key: usize) {
+    pub fn key_release(&mut self, key: u8) {
         if key < KEYS_COUNT {
-            self.keys[key] = false;
+            self.keys[key as usize] = false;
         }
     }
 
     /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included.
     /// `pressed` is true when pressed, false when released.
-    pub fn key_set(&mut self, key: usize, pressed: bool) {
+    pub fn key_set(&mut self, key: u8, pressed: bool) {
         if key < KEYS_COUNT {
-            self.keys[key] = pressed;
+            self.keys[key as usize] = pressed;
         }
     }
 
@@ -251,14 +255,14 @@ impl Chirp8 {
                 0xFE => self.high_resolution = false,
                 // Enable High-res (S-chip)
                 0xFF => self.high_resolution = true,
-                // Scroll up N or N/2 (Unofficial Super Chip)
+                // Scroll up N pixels (Unofficial Super Chip)
                 0xB0..=0xBF => self.scroll_up(n),
-                // Scroll down N or N/2 (Super Chip)
+                // Scroll down N pixels (Super Chip)
                 0xC0..=0xCF => self.scroll_down(n),
-                // Scroll right 4 or 2 (Super Chip)
-                0xFB => self.scroll_right(),
-                // Scroll left 4 or 2 (Super Chip)
-                0xFC => self.scroll_left(),
+                // Scroll right 4 pixels (Super Chip)
+                0xFB => self.scroll_right(4),
+                // Scroll left 4 pixels (Super Chip)
+                0xFC => self.scroll_left(4),
                 _ => panic!("Unrecognized 0 instruction {:x}", instruction),
             },
             // Jump
@@ -551,7 +555,7 @@ impl Chirp8 {
         /// Bits in a byte.
         const BITS: usize = 8;
 
-        let high_resolution = self.mode == Chirp8Mode::SuperChip && self.high_resolution;
+        let high_resolution = self.mode == Chirp8Mode::SuperChipModern && self.high_resolution;
 
         // TODO : in high resolution mode, VF is set to the number of colliding rows, not just 0 or 1
 
@@ -652,47 +656,62 @@ impl Chirp8 {
         result
     }
 
-    /// Scrolls up display by `scroll` pixels, or `scroll/2` pixels in low-resolution.
+    /// Scrolls up display by `scroll` pixels.
+    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
+    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_up(&mut self, scroll: u8) {
-        let actual_scroll = if self.high_resolution {
+        let scroll = if self.high_resolution {
             scroll
         } else {
-            scroll / 2
+            scroll * 2
         } as usize;
-        self.display_buffer.rotate_left(actual_scroll);
+        self.display_buffer.rotate_left(scroll);
         // Bottom of screen is black.
-        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
-        {
+        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT] {
             black_row.fill(false);
         }
     }
 
-    /// Scrolls down display by `scroll` pixels, or `scroll/2` pixels in low-resolution.
+    /// Scrolls down display by `scroll` pixels.
+    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
+    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_down(&mut self, scroll: u8) {
-        let actual_scroll = if self.high_resolution {
+        let scroll = if self.high_resolution {
             scroll
         } else {
-            scroll / 2
+            scroll * 2
         } as usize;
-        self.display_buffer.rotate_right(actual_scroll);
+        self.display_buffer.rotate_right(scroll);
         // Top of screen is black.
-        for black_row in &mut self.display_buffer[0..actual_scroll] {
+        for black_row in &mut self.display_buffer[0..scroll] {
             black_row.fill(false);
         }
     }
 
-    /// Scrolls left display by 4, or 2 if i low resolution.
-    fn scroll_left(&mut self) {
-        let scroll = if self.high_resolution { 4 } else { 2 } as usize;
+    /// Scrolls left display by `scroll` pixels.
+    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
+    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
+    fn scroll_left(&mut self, scroll: u8) {
+        let scroll = if self.high_resolution {
+            scroll
+        } else {
+            scroll * 2
+        } as usize;
         for row in &mut self.display_buffer {
             row.rotate_left(scroll);
             row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(false);
         }
     }
 
-    /// Scrolls right display by 4, or 2 if i low resolution.
-    fn scroll_right(&mut self) {
-        let scroll = if self.high_resolution { 4 } else { 2 } as usize;
+    /// Scrolls right display by `scroll` pixels.
+    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
+    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
+    fn scroll_right(&mut self, scroll: u8) {
+        let scroll = if self.high_resolution {
+            scroll
+        } else {
+            scroll * 2
+        } as usize;
         for row in &mut self.display_buffer {
             row.rotate_right(scroll);
             row[0..scroll].fill(false);
@@ -770,7 +789,7 @@ mod test {
 
     #[test]
     fn opcode_draw_high_res() {
-        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + 5].copy_from_slice(&[
             0x00, 0xFF, // Enable High-res
             0xD0, 0x11, // Draw v0 v1 1
@@ -795,22 +814,13 @@ mod test {
 
     #[test]
     fn opcode_scroll_vertical() {
-        // // Scroll up N or N/2 (Unofficial Super Chip)
-        // 0xB0..=0xBF => self.scroll_up(n),
-        // // Scroll down N or N/2 (Super Chip)
-        // 0xC0..=0xCF => self.scroll_down(n),
-        // // Scroll right 4 or 2 (Super Chip)
-        // 0xFB => self.scroll_right(),
-        // // Scroll left 4 or 2 (Super Chip)
-        // 0xFC => self.scroll_left(),
-
         let rom = [
             0x00, 0xB5, // Scroll up by 5
             0x00, 0xC7, // Scroll down by 7
             0x80, // Sprite with one pixel to the left
         ];
 
-        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
         emulator.display_buffer[37][67] = true;
         emulator.index = PROGRAM_START as u16 + 4;
@@ -832,12 +842,12 @@ mod test {
         emulator.step();
 
         assert_eq!(emulator.display_buffer[39][67], false);
-        assert_eq!(emulator.display_buffer[37][67], true);
+        assert_eq!(emulator.display_buffer[29][67], true);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], false);
-        assert_eq!(emulator.display_buffer[40][67], true);
+        assert_eq!(emulator.display_buffer[29][67], false);
+        assert_eq!(emulator.display_buffer[43][67], true);
     }
 
     #[test]
@@ -848,7 +858,7 @@ mod test {
             0x80, // Sprite with one pixel to the left
         ];
 
-        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
         emulator.display_buffer[37][67] = true;
         emulator.index = PROGRAM_START as u16 + 4;
@@ -870,11 +880,11 @@ mod test {
         emulator.step();
 
         assert_eq!(emulator.display_buffer[37][67], false);
-        assert_eq!(emulator.display_buffer[37][69], true);
+        assert_eq!(emulator.display_buffer[37][75], true);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][69], false);
+        assert_eq!(emulator.display_buffer[37][75], false);
         assert_eq!(emulator.display_buffer[37][67], true);
     }
     // TODO : test other opcodes
