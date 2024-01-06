@@ -197,6 +197,16 @@ impl Chirp8 {
             + (self.ram[self.pc as usize + 1] as u16)
     }
 
+    /// Resets interpreter to beginning of program.
+    pub fn reset(&mut self) {
+        self.pc = PROGRAM_START as u16;
+        self.registers.fill(0);
+        self.display_changed = true;
+        for row in &mut self.display_buffer {
+            row.fill(false);
+        }
+    }
+
     /// Execute one machine instruction.
     pub fn step(&mut self) {
         const PROGRAM_COUNTER_STEP: u16 = 2;
@@ -218,24 +228,33 @@ impl Chirp8 {
         let nnn = 0x0FFF & instruction;
 
         match opcode {
-            0x0 => match instruction {
+            0x0 => match nn {
+                // NOP
+                0x00 => {}
+                // // Exit from interpreter (chip8run)
+                // 0x10..=0x1F => {} // TODO reset()
                 // Clear screen
-                0x00E0 => {
+                0xE0 => {
                     for row in &mut self.display_buffer {
                         row.fill(false)
                     }
                 }
                 // Return from subroutine
-                0x00EE => self.pc = self.stack.pop().ok().unwrap(),
-                // Exit from interpreter (S-Chip) (do nothing here)
-                0x00FD => (),
+                0xEE => self.pc = self.stack.pop().ok().unwrap(),
+                // Exit from interpreter (S-Chip)
+                0xFD => self.reset(),
                 // Disable High-res (S-Chip)
-                0x00FE => self.high_resolution = false,
+                0xFE => self.high_resolution = false,
                 // Enable High-res (S-chip)
-                0x00FF => self.high_resolution = true,
-                // TODO 0x00CN : scroll down n pixels
-                // TODO 0x00FB : scroll right 4 pixels
-                // TODO 0x00CN : scroll left 4 pixels
+                0xFF => self.high_resolution = true,
+                // Scroll up N or N/2 (Unofficial Super Chip)
+                0xB0..=0xBF => self.scroll_up(n),
+                // Scroll down N or N/2 (Super Chip)
+                0xC0..=0xCF => self.scroll_down(n),
+                // Scroll right 4 or 2 (Super Chip)
+                0xFB => self.scroll_right(),
+                // Scroll left 4 or 2 (Super Chip)
+                0xFC => self.scroll_left(),
                 _ => panic!("Unrecognized 0 instruction {:x}", instruction),
             },
             // Jump
@@ -623,6 +642,53 @@ impl Chirp8 {
         result
     }
 
+    /// Scrolls up display by `scroll` pixels, or `scroll/2` pixels in low-resolution.
+    fn scroll_up(&mut self, scroll: u8) {
+        let actual_scroll = if self.high_resolution {
+            scroll
+        } else {
+            scroll / 2
+        } as usize;
+        self.display_buffer.rotate_left(actual_scroll);
+        // Bottom of screen is black.
+        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
+        {
+            black_row.fill(false);
+        }
+    }
+
+    /// Scrolls down display by `scroll` pixels, or `scroll/2` pixels in low-resolution.
+    fn scroll_down(&mut self, scroll: u8) {
+        let actual_scroll = if self.high_resolution {
+            scroll
+        } else {
+            scroll / 2
+        } as usize;
+        self.display_buffer.rotate_right(actual_scroll);
+        // Top of screen is black.
+        for black_row in &mut self.display_buffer[0..actual_scroll] {
+            black_row.fill(false);
+        }
+    }
+
+    /// Scrolls left display by 4, or 2 if i low resolution.
+    fn scroll_left(&mut self) {
+        let scroll = if self.high_resolution { 4 } else { 2 } as usize;
+        for row in &mut self.display_buffer {
+            row.rotate_left(scroll);
+            row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(false);
+        }
+    }
+
+    /// Scrolls right display by 4, or 2 if i low resolution.
+    fn scroll_right(&mut self) {
+        let scroll = if self.high_resolution { 4 } else { 2 } as usize;
+        for row in &mut self.display_buffer {
+            row.rotate_right(scroll);
+            row[0..scroll].fill(false);
+        }
+    }
+
     /// Indicates whether the sound buzzer is currently on.
     pub fn is_buzzer_on(&self) -> bool {
         self.sound_timer > 0
@@ -715,6 +781,91 @@ mod test {
 
         assert_eq!(emulator.get_display_buffer()[45][67], false);
         assert_eq!(emulator.registers[0xF], 1);
+    }
+
+    #[test]
+    fn opcode_scroll_vertical() {
+        // // Scroll up N or N/2 (Unofficial Super Chip)
+        // 0xB0..=0xBF => self.scroll_up(n),
+        // // Scroll down N or N/2 (Super Chip)
+        // 0xC0..=0xCF => self.scroll_down(n),
+        // // Scroll right 4 or 2 (Super Chip)
+        // 0xFB => self.scroll_right(),
+        // // Scroll left 4 or 2 (Super Chip)
+        // 0xFC => self.scroll_left(),
+
+        let rom = [
+            0x00, 0xB5, // Scroll up by 5
+            0x00, 0xC7, // Scroll down by 7
+            0x80, // Sprite with one pixel to the left
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+        emulator.display_buffer[37][67] = true;
+        emulator.index = PROGRAM_START as u16 + 4;
+        emulator.high_resolution = true;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], false);
+        assert_eq!(emulator.display_buffer[32][67], true);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[32][67], false);
+        assert_eq!(emulator.display_buffer[39][67], true);
+
+        emulator.pc = PROGRAM_START as u16;
+        emulator.high_resolution = false;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[39][67], false);
+        assert_eq!(emulator.display_buffer[37][67], true);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], false);
+        assert_eq!(emulator.display_buffer[40][67], true);
+    }
+
+    #[test]
+    fn opcode_scroll_horizontal() {
+        let rom = [
+            0x00, 0xFB, // Scroll right
+            0x00, 0xFC, // Scroll left
+            0x80, // Sprite with one pixel to the left
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+        emulator.display_buffer[37][67] = true;
+        emulator.index = PROGRAM_START as u16 + 4;
+        emulator.high_resolution = true;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], false);
+        assert_eq!(emulator.display_buffer[37][71], true);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][71], false);
+        assert_eq!(emulator.display_buffer[37][67], true);
+
+        emulator.pc = PROGRAM_START as u16;
+        emulator.high_resolution = false;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], false);
+        assert_eq!(emulator.display_buffer[37][69], true);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][69], false);
+        assert_eq!(emulator.display_buffer[37][67], true);
     }
     // TODO : test other opcodes
 }
