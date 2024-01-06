@@ -147,6 +147,37 @@ fn quirks_chip_8() {
 }
 
 #[test]
+fn quirks_super_chip_1_1() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChip1_1);
+
+    emulator.load_rom(rom);
+    // Force super chip test mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+    // Legacy mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+
+    for _ in 0..5000 {
+        emulator.step();
+    }
+    print_display(emulator.get_display_buffer());
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/quirks_super_chip_legacy.bmp").unwrap();
+
+    for i in 0..64 {
+        for j in 0..128 {
+            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
+        }
+    }
+}
+
+#[test]
 fn quirks_super_chip_modern() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
@@ -178,12 +209,44 @@ fn quirks_super_chip_modern() {
 }
 
 #[test]
-fn scrolling_lores_modern() {
+fn scrolling_hires_1_1() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
 
     // Create and run emulator
-    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChipModern);
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChip1_1);
+    emulator.load_rom(rom);
+
+    // Super chip test mode
+    let key = 1;
+    acknowledge_keypress(&mut emulator, key);
+    //print_display(emulator.get_display_buffer());
+    // hires mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+    //print_display(emulator.get_display_buffer());
+
+    for _ in 0..5000 {
+        emulator.step();
+    }
+    print_display(emulator.get_display_buffer());
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
+    for i in 0..64 {
+        for j in 0..128 {
+            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
+        }
+    }
+}
+
+#[test]
+fn scrolling_lores_1_1() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChip1_1);
     emulator.load_rom(rom);
 
     // Super chip test mode
@@ -192,8 +255,8 @@ fn scrolling_lores_modern() {
     // lores mode
     let key = 1;
     acknowledge_keypress(&mut emulator, key);
-    // Modern mode
-    let key = 1;
+    // Legacy mode
+    let key = 2;
     acknowledge_keypress(&mut emulator, key);
 
     for _ in 0..5000 {
@@ -236,6 +299,40 @@ fn scrolling_hires_modern() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
+    for i in 0..64 {
+        for j in 0..128 {
+            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
+        }
+    }
+}
+
+#[test]
+fn scrolling_lores_modern() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChipModern);
+    emulator.load_rom(rom);
+
+    // Super chip test mode
+    let key = 1;
+    acknowledge_keypress(&mut emulator, key);
+    // lores mode
+    let key = 1;
+    acknowledge_keypress(&mut emulator, key);
+    // Modern mode
+    let key = 1;
+    acknowledge_keypress(&mut emulator, key);
+
+    for _ in 0..5000 {
+        emulator.step();
+    }
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/scrolling_lores.bmp").unwrap();
+    print_display(display);
+
     for i in 0..64 {
         for j in 0..128 {
             assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);

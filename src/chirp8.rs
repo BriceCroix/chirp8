@@ -70,17 +70,18 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // E (absent)
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // F (absent)
 ];
-
-/// Number of CPU steps executed each second.
-pub const STEPS_PER_SECOND: usize = 600;
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
 pub const REFRESH_RATE_HZ: usize = 60;
 /// Number of CPU steps executed between two consecutive frames.
 /// Also dictates the number of steps between two timer decreases.
-const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
+const STEPS_PER_FRAME: usize = 10; // TODO : make this a parameter.
+/// Number of CPU steps executed each second.
+pub const STEPS_PER_SECOND: usize = STEPS_PER_FRAME * REFRESH_RATE_HZ;
 /// Number of RPL flags registers on the HP48.
 const RPL_REGISTERS_COUNT: usize = 8;
+/// Number of memory bytes read by CPU at each cycle.
+const PROGRAM_COUNTER_STEP: u16 = 2;
 
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
@@ -88,14 +89,15 @@ const RPL_REGISTERS_COUNT: usize = 8;
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
-    /// Modernized HP48 Super-Chip 1.1 extension from 1991, uses 128x64 display.
+    // HP48 Super-Chip 1.1 extension from 1991, uses 128x64 display.
+    SuperChip1_1,
+    /// Modernized Super-Chip 1.1 extension from 1991, uses 128x64 display.
     /// Like "modern" interpreters, does not feature the "display wait" quirk,
     /// where the Super-Chip 1.1 would feature the display wait but only in low-resolution.
     /// Does not feature the "half scroll" quirk as well, where the original interpreter would
     /// allow to scroll half pixels when in low-resolution.
     SuperChipModern,
     // TODO : XOChip,
-    // TODO SuperChip1_1
     // TODO SuperChip1_0
 }
 
@@ -217,7 +219,6 @@ impl Chirp8 {
 
     /// Execute one machine instruction.
     pub fn step(&mut self) {
-        const PROGRAM_COUNTER_STEP: u16 = 2;
         // Big endian instruction
         let instruction = self.next_instruction();
         self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
@@ -240,7 +241,7 @@ impl Chirp8 {
                 // NOP
                 0x00 => {}
                 // // Exit from interpreter (chip8run)
-                // 0x10..=0x1F => {} // TODO reset()
+                // 0x10..=0x1F => self.reset(),
                 // Clear screen
                 0xE0 => {
                     for row in &mut self.display_buffer {
@@ -542,7 +543,10 @@ impl Chirp8 {
     fn handle_display_wait(&mut self) {
         // See : https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
 
-        if self.mode == Chirp8Mode::CosmacChip8 {
+        let wait_enabled = self.mode == Chirp8Mode::CosmacChip8
+            || (self.mode == Chirp8Mode::SuperChip1_1 && !self.high_resolution);
+
+        if wait_enabled {
             // Wait for next frame, but instead of waiting, shortcut time.
             // The other option is to decrement pc if steps_since_frame is not 0,
             // But that messes with the number of steps required to do something,
@@ -561,7 +565,7 @@ impl Chirp8 {
         /// Bits in a byte.
         const BITS: usize = 8;
 
-        let high_resolution = self.mode == Chirp8Mode::SuperChipModern && self.high_resolution;
+        let high_resolution = self.mode != Chirp8Mode::CosmacChip8 && self.high_resolution;
 
         // TODO : in high resolution mode, VF is set to the number of colliding rows, not just 0 or 1
 
@@ -666,14 +670,20 @@ impl Chirp8 {
     /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
     /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_up(&mut self, scroll: u8) {
-        let scroll = if self.high_resolution {
-            scroll
+        // mode == Cosmac Chip 8 is not checked, should not happen.
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+            if self.high_resolution {
+                scroll
+            } else {
+                scroll * 2
+            }
         } else {
-            scroll * 2
+            scroll
         } as usize;
-        self.display_buffer.rotate_left(scroll);
+        self.display_buffer.rotate_left(actual_scroll);
         // Bottom of screen is black.
-        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT] {
+        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
+        {
             black_row.fill(false);
         }
     }
@@ -682,14 +692,19 @@ impl Chirp8 {
     /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
     /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_down(&mut self, scroll: u8) {
-        let scroll = if self.high_resolution {
-            scroll
+        // mode == Cosmac Chip 8 is not checked, should not happen.
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+            if self.high_resolution {
+                scroll
+            } else {
+                scroll * 2
+            }
         } else {
-            scroll * 2
+            scroll
         } as usize;
-        self.display_buffer.rotate_right(scroll);
+        self.display_buffer.rotate_right(actual_scroll);
         // Top of screen is black.
-        for black_row in &mut self.display_buffer[0..scroll] {
+        for black_row in &mut self.display_buffer[0..actual_scroll] {
             black_row.fill(false);
         }
     }
@@ -698,14 +713,18 @@ impl Chirp8 {
     /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
     /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_left(&mut self, scroll: u8) {
-        let scroll = if self.high_resolution {
-            scroll
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+            if self.high_resolution {
+                scroll
+            } else {
+                scroll * 2
+            }
         } else {
-            scroll * 2
+            scroll
         } as usize;
         for row in &mut self.display_buffer {
-            row.rotate_left(scroll);
-            row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(false);
+            row.rotate_left(actual_scroll);
+            row[(DISPLAY_WIDTH - actual_scroll)..DISPLAY_WIDTH].fill(false);
         }
     }
 
@@ -713,14 +732,18 @@ impl Chirp8 {
     /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
     /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_right(&mut self, scroll: u8) {
-        let scroll = if self.high_resolution {
-            scroll
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+            if self.high_resolution {
+                scroll
+            } else {
+                scroll * 2
+            }
         } else {
-            scroll * 2
+            scroll
         } as usize;
         for row in &mut self.display_buffer {
-            row.rotate_right(scroll);
-            row[0..scroll].fill(false);
+            row.rotate_right(actual_scroll);
+            row[0..actual_scroll].fill(false);
         }
     }
 
