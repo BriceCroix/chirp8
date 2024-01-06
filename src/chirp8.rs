@@ -86,7 +86,9 @@ const STEPS_PER_FRAME: usize = STEPS_PER_SECOND / REFRESH_RATE_HZ;
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
-    /// HP48 Super-Chip 1.1 extension from 1984, uses 128x64 display.
+    /// HP48 Super-Chip 1.1 extension from 1991, uses 128x64 display.
+    /// Does not feature the display wait quirk, like "modern" interpreters do.
+    /// The Super-Chip 1.1 would feature the display wait but only in low-resolution.
     SuperChip,
     // TODO : XOChip,
 }
@@ -177,7 +179,8 @@ impl Chirp8 {
         }
     }
 
-    /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included. `pressed` is true when pressed, false when released.
+    /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included.
+    /// `pressed` is true when pressed, false when released.
     pub fn key_set(&mut self, key: usize, pressed: bool) {
         if key < KEYS_COUNT {
             self.keys[key] = pressed;
@@ -191,6 +194,7 @@ impl Chirp8 {
         }
     }
 
+    /// Get the next instruction to execute from memory.
     fn next_instruction(&self) -> u16 {
         const BITS_IN_BYTE: u16 = 8;
         ((self.ram[self.pc as usize] as u16) << BITS_IN_BYTE)
@@ -422,6 +426,7 @@ impl Chirp8 {
                     }
                     // Get Key
                     0x0A => {
+                        // TODO : should wait for a key release.
                         if let Option::Some(key) = self.get_first_key() {
                             self.registers[x] = key;
                         } else {
@@ -430,7 +435,10 @@ impl Chirp8 {
                     }
                     // FX29: Font character
                     0x29 => {
-                        // TODO SuperChip1.0 : Point I to 5-byte font sprite as in CHIP-8, but if the high nibble in VX is 1 (ie. for values between 10 and 19 in hex) it will point I to a 10-byte font sprite for the digit in the lower nibble of VX (only digits 0-9)
+                        // Not implemented : SuperChip1.0 : Point I to 5-byte font sprite as in CHIP-8,
+                        // but if the high nibble in VX is 1 (ie. for values between 10 and 19 in hex) it will
+                        // point I to a 10-byte font sprite for the digit in the lower nibble of VX (only digits 0-9).
+                        // The following is the SuperChip1.1 behavior.
                         self.index = FONT_SPRITES_ADDRESS as u16
                             + FONT_SPRITES_STEP as u16 * self.registers[x & 0xF] as u16;
                     }
@@ -522,7 +530,7 @@ impl Chirp8 {
     /// - The *modern* Super chip never waits.
     /// This method implements the original cosmac and the "modern" super-chip behaviors.
     fn handle_display_wait(&mut self) {
-        //https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
+        // See : https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
 
         if self.mode == Chirp8Mode::CosmacChip8 {
             // Wait for next frame, but instead of waiting, shortcut time.
@@ -544,6 +552,8 @@ impl Chirp8 {
         const BITS: usize = 8;
 
         let high_resolution = self.mode == Chirp8Mode::SuperChip && self.high_resolution;
+
+        // TODO : in high resolution mode, VF is set to the number of colliding rows, not just 0 or 1
 
         if high_resolution && height == 0 {
             // Handle instruction DXY0 : display 16x16 sprite
