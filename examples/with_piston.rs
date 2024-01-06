@@ -15,7 +15,7 @@ pub struct App {
 }
 
 impl App {
-    fn new(rom: &[u8; chirp8::PROGRAM_SIZE], mode: chirp8::Chirp8Mode) -> App {
+    fn new(rom: &[u8], mode: chirp8::Chirp8Mode) -> App {
         const WIDTH: u32 = (chirp8::DISPLAY_WIDTH * PIXELS_PER_CELL) as u32;
         const HEIGHT: u32 = (chirp8::DISPLAY_HEIGHT * PIXELS_PER_CELL) as u32;
 
@@ -135,12 +135,10 @@ impl App {
 }
 
 fn main() {
-    let rom_file = include_bytes!("../submodules/chip8-test-suite/bin/6-keypad.ch8");
-    let mut rom = [0; chirp8::PROGRAM_SIZE];
-    rom[..rom_file.len()].copy_from_slice(rom_file);
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
 
     // Create a new game and run it.
-    let mut app = App::new(&rom, Chirp8Mode::SuperChip);
+    let mut app = App::new(rom, Chirp8Mode::SuperChip);
 
     app.run();
 }

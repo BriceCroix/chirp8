@@ -628,10 +628,9 @@ impl Chirp8 {
         self.sound_timer > 0
     }
 
-    /// Load a ROM into memory.
-    /// The ROM may be smaller than array, in that case pad with any value.
-    pub fn load_rom(&mut self, rom: &[u8; PROGRAM_SIZE]) {
-        self.ram[PROGRAM_START..(PROGRAM_START + PROGRAM_SIZE)].copy_from_slice(rom);
+    /// Load a ROM into memory. The ROM must be smaller than `PROGRAM_SIZE`.
+    pub fn load_rom(&mut self, rom: &[u8]) {
+        self.ram[PROGRAM_START..(PROGRAM_START + rom.len())].copy_from_slice(rom);
     }
 
     /// Returns a reference to the internal display buffer.

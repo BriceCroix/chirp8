@@ -1,12 +1,9 @@
 fn main() {
-    let rom_file = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
-
-    let mut rom = [0; chirp8::PROGRAM_SIZE];
-    rom[..rom_file.len()].copy_from_slice(rom_file);
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
 
     let mut chirp8 = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
 
-    chirp8.load_rom(&rom);
+    chirp8.load_rom(rom);
 
     chirp8.key_press(1);
     for step in 0..1000 {
