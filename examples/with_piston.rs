@@ -6,6 +6,7 @@ use piston::window::WindowSettings;
 use piston::{Button, Event, EventLoop, Key, PressEvent, ReleaseEvent};
 use piston_window::PistonWindow as Window;
 
+/// Number of desktop pixels per chip-8 pixel.
 const PIXELS_PER_CELL: usize = 10;
 
 pub struct App {
@@ -54,8 +55,15 @@ impl App {
         const COLOR_ON: Color = [1.0, 1.0, 1.0, 1.0];
 
         self.window.draw_2d(event, |c, g, _device| {
+            // Draw red background if sound.
+            const SOUND_COLOR: Color = [1.0, 0.0, 0.0, 0.5];
+            let background = if self.emulator.is_buzzer_on() {
+                SOUND_COLOR
+            } else {
+                COLOR_OFF
+            };
             // Clear the screen.
-            clear(COLOR_OFF, g);
+            clear(background, g);
 
             let emulator_screen = self.emulator.get_display_buffer();
 
@@ -112,7 +120,7 @@ impl App {
 
     pub fn run(&mut self) {
         let update_per_second = chirp8::REFRESH_RATE_HZ;
-        self.window.set_max_fps(chirp8::REFRESH_RATE_HZ as u64);
+        self.window.set_max_fps(120);
         self.window.set_ups(update_per_second as u64);
         self.window.set_lazy(false);
 
