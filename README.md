@@ -11,9 +11,10 @@ The library is compatible with `no_std` environments and can be used to create h
 
 ## Crate features
 
-| **Feature name** |                                            **Description**                                            | **Default-enabled** |
-| :--------------: | :---------------------------------------------------------------------------------------------------: | :-----------------: |
+| **Feature name** | **Description**                                                                                       | **Default-enabled** |
+| :--------------: | :---------------------------------------------------------------------------------------------------- | :-----------------: |
 |     `alloc`      | Allocates the objects that use the most memory on the heap (`Vec<T>`) instead of the stack (`[T; N]`) |         yes         |
+|     `xochip`     | Adds support for XO-chip. The biggest difference is the RAM size that grows from 4kb to 64kb.         |         yes         |
 
 ## Testing
 
