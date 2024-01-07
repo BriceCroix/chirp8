@@ -25,7 +25,7 @@ pub const DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
 /// The index of the flag used as a flag register.
-const FLAG_REGISTER_INDEX:usize = 0xF;
+const FLAG_REGISTER_INDEX: usize = 0xF;
 /// Numbers of keys used by the system.
 const KEYS_COUNT: u8 = 16;
 /// The location in memory of the font sprite '0'.
@@ -97,7 +97,6 @@ type Ram = alloc::vec::Vec<u8>;
 #[cfg(not(feature = "alloc"))]
 type Ram = [u8; RAM_SIZE];
 
-
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
 #[derive(PartialEq)]
@@ -114,7 +113,6 @@ pub enum Chirp8Mode {
     SuperChipModern,
     /// Octo XO-Chip extension from 2014. Uses 4-color 128x64 display.
     XOChip,
-
     // Should be implemented :
     // Chip48
     // SuperChip1_0
@@ -191,10 +189,11 @@ impl Chirp8 {
         ram[FONT_SPRITES_HIGH_ADDRESS..FONT_SPRITES_HIGH_ADDRESS + FONT_SPRITES_HIGH_SIZE]
             .copy_from_slice(&FONT_SPRITES_HIGH);
 
-        let steps_per_frame = match mode{
+        let steps_per_frame = match mode {
             Chirp8Mode::CosmacChip8 => 10,
             Chirp8Mode::SuperChip1_1 => 30,
             Chirp8Mode::SuperChipModern => 30,
+            Chirp8Mode::XOChip => 30,
         };
 
         // Create emulator
@@ -215,8 +214,8 @@ impl Chirp8 {
             steps_since_frame: 0,
             display_changed: true,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
-            steps:0,
-            steps_per_frame :steps_per_frame,
+            steps: 0,
+            steps_per_frame: steps_per_frame,
         }
     }
 
@@ -269,10 +268,9 @@ impl Chirp8 {
     /// Forces the interpreter to take given number of `steps`.
     /// `step()` may be called more times than `steps` parameter, due to interpreter being idle in certain conditions.
     /// In most cases, do not use this method, prefer `run_frame` or just `step`.
-    pub fn take_steps(&mut self, steps: usize)
-    {
+    pub fn take_steps(&mut self, steps: usize) {
         let target_steps = self.steps.wrapping_add(steps);
-        while self.steps != target_steps{
+        while self.steps != target_steps {
             self.step();
         }
     }
@@ -298,6 +296,8 @@ impl Chirp8 {
         let nn = 0xFF & instruction as u8;
         // The second, third and fourth nibbles. A 12-bit immediate memory address.
         let nnn = 0x0FFF & instruction;
+
+        // TODO : make so that modes that do not know instructions treat them as NOP (example : chip 8 ignores scroll).
 
         match opcode {
             0x0 => match nn {
@@ -467,13 +467,13 @@ impl Chirp8 {
                     || (self.mode == Chirp8Mode::SuperChip1_1 && !self.high_resolution);
 
                 if wait_enabled {
-                    if self.steps_since_frame != 0{                   
+                    if self.steps_since_frame != 0 {
                         self.pc = self.pc.wrapping_sub(PROGRAM_COUNTER_STEP) & RAM_MASK;
                         self.steps = self.steps.wrapping_sub(1);
-                    }else{
+                    } else {
                         self.display((self.registers[x], self.registers[y]), n);
                     }
-                }else{
+                } else {
                     self.display((self.registers[x], self.registers[y]), n);
                 }
             }
@@ -503,19 +503,18 @@ impl Chirp8 {
                     0x18 => self.sound_timer = self.registers[x],
                     // Add to index
                     0x1E => {
-                        if self.mode != Chirp8Mode::XOChip
-                        {
+                        if self.mode != Chirp8Mode::XOChip {
                             self.index = self.index + self.registers[x] as u16;
                             // Check 12-bits overflow
                             if self.index & !RAM_MASK != 0 {
                                 self.set_flag();
                                 self.index &= RAM_MASK;
                             }
-                        }else{
+                        } else {
                             // Check 16-bits overflow
-                            if let Some(result) = self.index.checked_add(self.registers[x] as u16){
+                            if let Some(result) = self.index.checked_add(self.registers[x] as u16) {
                                 self.index = result;
-                            }else{
+                            } else {
                                 self.index = self.index.wrapping_add(self.registers[x] as u16);
                                 self.set_flag();
                             }
@@ -555,36 +554,44 @@ impl Chirp8 {
                     }
                     // FX55 : Store
                     0x55 => {
-                        let end_index = x + 1;
+                        let end_index = (x + 1) as u16;
                         for i in 0..end_index {
-                            self.ram[(i + self.index as usize) & RAM_MASK as usize] =
-                                self.registers[i];
+                            self.ram[((self.index.wrapping_add(i)) & RAM_MASK) as usize] =
+                                self.registers[i as usize];
                         }
                         // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
-                        if self.mode == Chirp8Mode::CosmacChip8 {
-                            self.index = (self.index + end_index as u16) & RAM_MASK;
+                        if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                            self.index = (self.index.wrapping_add(end_index as u16)) & RAM_MASK;
                         }
                     }
                     // FX65: Load
                     0x65 => {
-                        let end_index = x + 1;
+                        let end_index = (x + 1) as u16;
                         for i in 0..end_index {
-                            self.registers[i] =
-                                self.ram[(i + self.index as usize) & RAM_MASK as usize];
+                            self.registers[i as usize] =
+                                self.ram[((self.index.wrapping_add(i)) & RAM_MASK) as usize];
                         }
                         // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
-                        if self.mode == Chirp8Mode::CosmacChip8 {
-                            self.index = (self.index + end_index as u16) & RAM_MASK;
+                        if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                            self.index = (self.index.wrapping_add(end_index as u16)) & RAM_MASK;
                         }
                     }
                     // FX75 : Save to flags registers (Super-Chip 1.0 and above)
                     0x75 => {
-                        let count = x & 0x7;
+                        let count = if self.mode == Chirp8Mode::XOChip {
+                            x
+                        } else {
+                            x & 0x7
+                        };
                         self.rpl_registers[0..count].copy_from_slice(&self.registers[0..count]);
                     }
                     // FX85 : Load from flags registers (Super-Chip 1.0 and above)
                     0x85 => {
-                        let count = x & 0x7;
+                        let count = if self.mode == Chirp8Mode::XOChip {
+                            x
+                        } else {
+                            x & 0x7
+                        };
                         self.registers[0..count].copy_from_slice(&self.rpl_registers[0..count]);
                     }
                     _ => panic!("Unrecognized E instruction {:x}", instruction),
@@ -620,8 +627,10 @@ impl Chirp8 {
 
     /// Returns the first key just released, between 0 and 15 included, or `Option::None` when nothing has changed.
     fn get_first_key_released(&self) -> Option<u8> {
-        for (index, (key, key_previous)) in self.keys.iter().zip(self.keys_previous.iter()).enumerate() {
-            if *key_previous && !*key{
+        for (index, (key, key_previous)) in
+            self.keys.iter().zip(self.keys_previous.iter()).enumerate()
+        {
+            if *key_previous && !*key {
                 return Option::Some(index as u8);
             }
         }
@@ -658,7 +667,7 @@ impl Chirp8 {
                 DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
             );
 
-            if high_resolution{
+            if high_resolution {
                 // Initialize the flag register as the number of sprite lines out-of-screen.
                 self.registers[FLAG_REGISTER_INDEX] = (LARGE_SPRITE_SIZE - actual_height) as u8;
             }
@@ -666,12 +675,17 @@ impl Chirp8 {
             for line in 0..actual_height {
                 let mut colliding_line = false;
                 for part in 0..BYTES_PER_LINE {
-                    let sprite_address =
-                        ((self.index.wrapping_add( BYTES_PER_LINE * (line as u16)).wrapping_add(part)) & RAM_MASK) as usize;
+                    let sprite_address = ((self
+                        .index
+                        .wrapping_add(BYTES_PER_LINE * (line as u16))
+                        .wrapping_add(part))
+                        & RAM_MASK) as usize;
                     let sprite = self.ram[sprite_address];
                     let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
                     for bit in 0..(min(BITS, actual_width - (part as usize) * BITS)) {
-                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH + (part as usize) * BITS + bit;
+                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
+                            + (part as usize) * BITS
+                            + bit;
 
                         // Should the pixel be flipped or not.
                         let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
@@ -681,7 +695,7 @@ impl Chirp8 {
                         *pixel ^= pixel_xor;
                         // Set flag when turned off
                         if pixel_before && !(*pixel) {
-                           colliding_line = true;
+                            colliding_line = true;
                         }
                     }
                 }
@@ -705,14 +719,13 @@ impl Chirp8 {
             );
 
             // The actual dimensions that fall in the screen boundaries.
-            let actual_height =
-                min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
+            let actual_height = min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
             let actual_width = min(
                 BITS as u8,
                 (max_width as u8).saturating_sub(x_y_coordinates.0),
             );
 
-            if high_resolution{
+            if high_resolution {
                 // Initialize the flag register as the number of sprite lines out-of-screen.
                 self.registers[FLAG_REGISTER_INDEX] = height - actual_height;
             }
@@ -743,10 +756,10 @@ impl Chirp8 {
                         colliding_line = true;
                     }
                 }
-                if colliding_line{
-                    if high_resolution{
+                if colliding_line {
+                    if high_resolution {
                         self.registers[FLAG_REGISTER_INDEX] += 1;
-                    }else{
+                    } else {
                         self.set_flag();
                     }
                 }
@@ -764,15 +777,16 @@ impl Chirp8 {
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
-            if self.high_resolution {
-                scroll
+        let actual_scroll =
+            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
+                if self.high_resolution {
+                    scroll
+                } else {
+                    scroll * 2
+                }
             } else {
-                scroll * 2
-            }
-        } else {
-            scroll
-        } as usize;
+                scroll
+            } as usize;
         self.display_buffer.rotate_left(actual_scroll);
         // Bottom of screen is black.
         for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
@@ -784,15 +798,16 @@ impl Chirp8 {
     /// Scrolls down display by `scroll` pixels.
     fn scroll_down(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
-            if self.high_resolution {
-                scroll
+        let actual_scroll =
+            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
+                if self.high_resolution {
+                    scroll
+                } else {
+                    scroll * 2
+                }
             } else {
-                scroll * 2
-            }
-        } else {
-            scroll
-        } as usize;
+                scroll
+            } as usize;
         self.display_buffer.rotate_right(actual_scroll);
         // Top of screen is black.
         for black_row in &mut self.display_buffer[0..actual_scroll] {
@@ -802,15 +817,16 @@ impl Chirp8 {
 
     /// Scrolls left display by `scroll` pixels.
     fn scroll_left(&mut self, scroll: u8) {
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
-            if self.high_resolution {
-                scroll
+        let actual_scroll =
+            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
+                if self.high_resolution {
+                    scroll
+                } else {
+                    scroll * 2
+                }
             } else {
-                scroll * 2
-            }
-        } else {
-            scroll
-        } as usize;
+                scroll
+            } as usize;
         for row in &mut self.display_buffer {
             row.rotate_left(actual_scroll);
             row[(DISPLAY_WIDTH - actual_scroll)..DISPLAY_WIDTH].fill(false);
@@ -819,15 +835,16 @@ impl Chirp8 {
 
     /// Scrolls right display by `scroll` pixels.
     fn scroll_right(&mut self, scroll: u8) {
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
-            if self.high_resolution {
-                scroll
+        let actual_scroll =
+            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
+                if self.high_resolution {
+                    scroll
+                } else {
+                    scroll * 2
+                }
             } else {
-                scroll * 2
-            }
-        } else {
-            scroll
-        } as usize;
+                scroll
+            } as usize;
         for row in &mut self.display_buffer {
             row.rotate_right(actual_scroll);
             row[0..actual_scroll].fill(false);
@@ -1016,6 +1033,7 @@ mod test {
 
     #[test]
     fn opcode_display_colliding_rows() {
+        #[rustfmt::skip]
         let rom = [
             0xD0, 0x15, // Display v0 v1 5
             0b1000_0000, // Sprite with one pixel to the left, 5 bytes tall
@@ -1056,6 +1074,7 @@ mod test {
 
     #[test]
     fn opcode_display_colliding_rows_16_16() {
+        #[rustfmt::skip]
         let rom = [
             0xD0, 0x10, // Display v0 v1 0
             0b1000_0000, 0b0000_0000, // 16x16 sprite with one pixel to the left
