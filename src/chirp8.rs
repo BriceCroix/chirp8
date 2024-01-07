@@ -19,6 +19,8 @@ pub const DISPLAY_WIDTH: usize = 128;
 pub const DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
+/// The index of the flag used as a flag register.
+const FLAG_REGISTER_INDEX:usize = 0xF;
 /// Numbers of keys used by the system.
 const KEYS_COUNT: u8 = 16;
 /// The location in memory of the font sprite '0'.
@@ -388,7 +390,7 @@ impl Chirp8 {
                         0
                     };
                     self.registers[x] = self.registers[x].wrapping_add(self.registers[y]);
-                    self.registers[0xF] = flag;
+                    self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
                 // SUB VX - VY
                 0x5 => {
@@ -398,7 +400,7 @@ impl Chirp8 {
                         0
                     };
                     self.registers[x] = self.registers[x].wrapping_sub(self.registers[y]);
-                    self.registers[0xF] = flag;
+                    self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
                 // Shift VX right
                 0x6 => {
@@ -407,7 +409,7 @@ impl Chirp8 {
                     }
                     let flag = self.registers[x] & 0x1;
                     self.registers[x] >>= 1;
-                    self.registers[0xF] = flag;
+                    self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
                 // SUB VY - VX
                 0x7 => {
@@ -417,7 +419,7 @@ impl Chirp8 {
                         0
                     };
                     self.registers[x] = self.registers[y].wrapping_sub(self.registers[x]);
-                    self.registers[0xF] = flag;
+                    self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
                 // Shift VX left
                 0xE => {
@@ -426,7 +428,7 @@ impl Chirp8 {
                     }
                     let flag = (self.registers[x] >> 7) & 0x1;
                     self.registers[x] <<= 1;
-                    self.registers[0xF] = flag;
+                    self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
                 _ => panic!("Unrecognized logic instruction {:x}", n),
             },
@@ -585,12 +587,12 @@ impl Chirp8 {
 
     #[inline]
     fn set_flag(&mut self) {
-        self.registers[0xF] = 1;
+        self.registers[FLAG_REGISTER_INDEX] = 1;
     }
 
     #[inline]
     fn reset_flag(&mut self) {
-        self.registers[0xF] = 0;
+        self.registers[FLAG_REGISTER_INDEX] = 0;
     }
 
     /// Returns the first key just released, between 0 and 15 included, or `Option::None` when nothing has changed.
@@ -613,16 +615,17 @@ impl Chirp8 {
 
         let high_resolution = self.mode != Chirp8Mode::CosmacChip8 && self.high_resolution;
 
-        // TODO : in high resolution mode, VF is set to the number of colliding rows, not just 0 or 1
+        // Hint : In high resolution mode, VF is set to the number of colliding rows, not just 0 or 1.
 
         if high_resolution && height == 0 {
-            // Handle instruction DXY0 : display 16x16 sprite
+            // Handle instruction DXY0 : display 16x16 sprite (height is 16, not 0)
 
             /// Width and Height of large sprites.
             const LARGE_SPRITE_SIZE: usize = 16;
             /// Bytes per line for large sprites.
             const BYTES_PER_LINE: usize = 2;
 
+            // The actual dimensions that fall in the screen boundaries.
             let actual_height = min(
                 LARGE_SPRITE_SIZE,
                 DISPLAY_HEIGHT.saturating_sub(x_y_coordinates.1 as usize),
@@ -632,7 +635,13 @@ impl Chirp8 {
                 DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
             );
 
+            if high_resolution{
+                // Initialize the flag register as the number of sprite lines out-of-screen.
+                self.registers[FLAG_REGISTER_INDEX] = (LARGE_SPRITE_SIZE - actual_height) as u8;
+            }
+
             for line in 0..actual_height {
+                let mut colliding_line = false;
                 for part in 0..BYTES_PER_LINE {
                     let sprite_address =
                         (self.index as usize + BYTES_PER_LINE * line + part) & RAM_MASK as usize;
@@ -649,9 +658,12 @@ impl Chirp8 {
                         *pixel ^= pixel_xor;
                         // Set flag when turned off
                         if pixel_before && !(*pixel) {
-                            self.set_flag();
+                           colliding_line = true;
                         }
                     }
+                }
+                if colliding_line {
+                    self.registers[FLAG_REGISTER_INDEX] += 1;
                 }
             }
         } else {
@@ -669,18 +681,25 @@ impl Chirp8 {
                 x_y_coordinates.1 % max_height as u8,
             );
 
+            // The actual dimensions that fall in the screen boundaries.
             let actual_height =
-                min(height, (max_height as u8).saturating_sub(x_y_coordinates.1)) as usize;
+                min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
             let actual_width = min(
                 BITS as u8,
                 (max_width as u8).saturating_sub(x_y_coordinates.0),
-            ) as usize;
+            );
 
-            for line in 0..actual_height {
+            if high_resolution{
+                // Initialize the flag register as the number of sprite lines out-of-screen.
+                self.registers[FLAG_REGISTER_INDEX] = height - actual_height;
+            }
+
+            for line in 0..(actual_height as usize) {
                 let sprite_address = ((self.index + line as u16) & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
                 let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
-                for bit in 0..actual_width {
+                let mut colliding_line = false;
+                for bit in 0..(actual_width as usize) {
                     let col = (x_y_coordinates.0 as usize + bit) * coordinates_scaler;
 
                     // Should the pixel be flipped or not.
@@ -698,6 +717,13 @@ impl Chirp8 {
                     }
                     // Set flag when turned off
                     if pixel_before && !pixel {
+                        colliding_line = true;
+                    }
+                }
+                if colliding_line{
+                    if high_resolution{
+                        self.registers[FLAG_REGISTER_INDEX] += 1;
+                    }else{
                         self.set_flag();
                     }
                 }
@@ -713,8 +739,6 @@ impl Chirp8 {
     }
 
     /// Scrolls up display by `scroll` pixels.
-    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
-    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_up(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
         let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
@@ -735,8 +759,6 @@ impl Chirp8 {
     }
 
     /// Scrolls down display by `scroll` pixels.
-    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
-    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_down(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
         let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
@@ -756,8 +778,6 @@ impl Chirp8 {
     }
 
     /// Scrolls left display by `scroll` pixels.
-    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
-    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_left(&mut self, scroll: u8) {
         let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
             if self.high_resolution {
@@ -775,8 +795,6 @@ impl Chirp8 {
     }
 
     /// Scrolls right display by `scroll` pixels.
-    /// This is the "modern" behavior where in low-res, the screens scrolls by `scroll` low-res pixels,
-    /// It does not scrolls by `scroll` half-pixels as it would on the original Super-CHip 1.1.
     fn scroll_right(&mut self, scroll: u8) {
         let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
             if self.high_resolution {
@@ -888,13 +906,13 @@ mod test {
         emulator.step();
 
         assert_eq!(emulator.get_display_buffer()[45][67], true);
-        assert_eq!(emulator.registers[0xF], 0);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 0);
 
         emulator.pc -= 2;
         emulator.step();
 
         assert_eq!(emulator.get_display_buffer()[45][67], false);
-        assert_eq!(emulator.registers[0xF], 1);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
     }
 
     #[test]
@@ -972,5 +990,95 @@ mod test {
         assert_eq!(emulator.display_buffer[37][75], false);
         assert_eq!(emulator.display_buffer[37][67], true);
     }
+
+    #[test]
+    fn opcode_display_colliding_rows() {
+        let rom = [
+            0xD0, 0x15, // Display v0 v1 5
+            0b1000_0000, // Sprite with one pixel to the left, 5 bytes tall
+            0b1000_0000,
+            0b1000_0000,
+            0b1000_0000,
+            0b1000_0000,
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.index = PROGRAM_START as u16 + 2;
+        emulator.high_resolution = true;
+
+        // 2 out of bounds rows
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 61;
+        emulator.step();
+        assert_eq!(emulator.display_buffer[61][17], true);
+        assert_eq!(emulator.display_buffer[62][17], true);
+        assert_eq!(emulator.display_buffer[63][17], true);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 2);
+
+        // 3 colliding rows (61 to 63 included)
+        emulator.pc = PROGRAM_START as u16;
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 59;
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[59][17], true);
+        assert_eq!(emulator.display_buffer[60][17], true);
+        assert_eq!(emulator.display_buffer[61][17], false);
+        assert_eq!(emulator.display_buffer[62][17], false);
+        assert_eq!(emulator.display_buffer[63][17], false);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 3);
+    }
+
+    #[test]
+    fn opcode_display_colliding_rows_16_16() {
+        let rom = [
+            0xD0, 0x10, // Display v0 v1 0
+            0b1000_0000, 0b0000_0000, // 16x16 sprite with one pixel to the left
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.index = PROGRAM_START as u16 + 2;
+        emulator.high_resolution = true;
+
+        // 13 out of bounds rows
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 61;
+        emulator.step();
+        assert_eq!(emulator.display_buffer[61][17], true);
+        assert_eq!(emulator.display_buffer[62][17], true);
+        assert_eq!(emulator.display_buffer[63][17], true);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 13);
+
+        // 3 colliding rows (48 to 63 included)
+        emulator.pc = PROGRAM_START as u16;
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 48;
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[61][17], false);
+        assert_eq!(emulator.display_buffer[62][17], false);
+        assert_eq!(emulator.display_buffer[63][17], false);
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 3);
+    }
+
     // TODO : test other opcodes
 }
