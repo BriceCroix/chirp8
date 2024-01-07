@@ -23,20 +23,23 @@ impl App {
         const WIDTH: u32 = (chirp8::DISPLAY_WIDTH * PIXELS_PER_CELL) as u32;
         const HEIGHT: u32 = (chirp8::DISPLAY_HEIGHT * PIXELS_PER_CELL) as u32;
 
-        /// DIRTY FIX : for some reason Piston creates a window too large by these values,
+        /// DIRTY FIX : for some reason on linux Piston creates a window too large by these values,
         /// This does not depend on the WIDTH and HEIGHT, this is a constant error.
         const WINDOW_WIDTH_ERROR: u32 = 20;
         const WINDOW_HEIGHT_ERROR: u32 = 55;
 
-        let window = WindowSettings::new(
-            "Chirp 8",
-            [WIDTH - WINDOW_WIDTH_ERROR, HEIGHT - WINDOW_HEIGHT_ERROR],
-        )
-        .graphics_api(OpenGL::V3_2)
-        .exit_on_esc(true)
-        .resizable(false)
-        .build()
-        .unwrap();
+        let size = if cfg!(target_os = "linux") {
+            [WIDTH - WINDOW_WIDTH_ERROR, HEIGHT - WINDOW_HEIGHT_ERROR]
+        } else {
+            [WIDTH, HEIGHT]
+        };
+
+        let window = WindowSettings::new("Chirp 8", size)
+            .graphics_api(OpenGL::V3_2)
+            .exit_on_esc(true)
+            .resizable(false)
+            .build()
+            .unwrap();
 
         let mut app = Self {
             emulator: Chirp8::new(mode),
@@ -96,8 +99,7 @@ impl App {
 
     /// `pressed` is true when the key is pressed and false when released.
     fn process_keyboard(&mut self, key: Key, pressed: bool) {
-        match self.keyboard_layout
-        {
+        match self.keyboard_layout {
             // QWERTY layout
             KeyboardLayout::Qwerty => match key {
                 Key::D1 => self.emulator.key_set(0x1, pressed),
@@ -118,7 +120,7 @@ impl App {
                 Key::V => self.emulator.key_set(0xF, pressed),
                 // Discard other keys
                 _ => {}
-            }
+            },
 
             // QWERTY layout
             KeyboardLayout::Azerty => match key {
@@ -140,11 +142,11 @@ impl App {
                 Key::V => self.emulator.key_set(0xF, pressed),
                 // Discard other keys
                 _ => {}
-            }
+            },
         }
         // Common to all layouts
-        match key{
-            // Numeric pad 
+        match key {
+            // Numeric pad
             Key::NumPad7 => self.emulator.key_set(0x1, pressed),
             Key::NumPad8 => self.emulator.key_set(0x2, pressed),
             Key::NumPad9 => self.emulator.key_set(0x3, pressed),
@@ -160,7 +162,6 @@ impl App {
             // Discard other keys
             _ => {}
         }
-    
     }
 
     pub fn run(&mut self) {
@@ -188,7 +189,7 @@ impl App {
 }
 
 #[derive(PartialEq)]
-enum KeyboardLayout{
+enum KeyboardLayout {
     Qwerty,
     Azerty,
 }
@@ -209,14 +210,20 @@ fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
     Ok(buffer)
 }
 
-/// Function to parse program options
-fn parse_arguments(args: &std::vec::Vec<String>) -> (chirp8::Chirp8Mode, KeyboardLayout) {
+/// Function to parse program options.
+/// Returns the rom file path, chosen chip-8 mode, and keyboard layout.
+fn parse_arguments(args: &std::vec::Vec<String>) -> (String, chirp8::Chirp8Mode, KeyboardLayout) {
     let mut opts = getopts::Options::new();
 
     opts.optflag("c", "chip", "Use original Chip-8");
     opts.optflag("s", "super-chip", "Use Super Chip 1.1");
     opts.optflag("m", "modern-super-chip", "Use Modernized Super Chip");
-    opts.optflag("a", "azerty", "Use Azerty keyboard layout instead of Qwerty");
+    opts.optflag("x", "xo-chip", "Use XO-Chip");
+    opts.optflag(
+        "a",
+        "azerty",
+        "Use Azerty keyboard layout instead of Qwerty",
+    );
 
     // Parse options
     let matches = match opts.parse(&args[1..]) {
@@ -227,12 +234,23 @@ fn parse_arguments(args: &std::vec::Vec<String>) -> (chirp8::Chirp8Mode, Keyboar
         }
     };
 
+    // Get the file path
+    let file_path = if !matches.free.is_empty() {
+        matches.free[0].clone()
+    } else {
+        // If no file path is provided, print usage and exit
+        eprintln!("Usage: {} [-c | -s | -m] <file_path>", args[0]);
+        std::process::exit(1);
+    };
+
     let mode = if matches.opt_present("c") {
         Chirp8Mode::CosmacChip8
     } else if matches.opt_present("s") {
         Chirp8Mode::SuperChip1_1
     } else if matches.opt_present("m") {
         Chirp8Mode::SuperChipModern
+    } else if matches.opt_present("x") {
+        Chirp8Mode::XOChip
     } else {
         Chirp8Mode::CosmacChip8
     };
@@ -243,7 +261,7 @@ fn parse_arguments(args: &std::vec::Vec<String>) -> (chirp8::Chirp8Mode, Keyboar
         KeyboardLayout::Qwerty
     };
 
-    (mode, layout)
+    (file_path, mode, layout)
 }
 
 fn main() {
@@ -256,12 +274,9 @@ fn main() {
         return;
     }
 
-    let (mode, layout) = parse_arguments(&args);
+    let (file_path, mode, layout) = parse_arguments(&args);
 
-    // Use the first argument as the rom file path
-    let file_path = &args[1];
-
-    match read_file_bytes(file_path) {
+    match read_file_bytes(&file_path) {
         Ok(rom) => {
             // Create a new app and run it.
             let mut app = App::new(rom.as_slice(), mode, layout);
