@@ -319,6 +319,8 @@ impl Chirp8 {
                 0xFE => self.high_resolution = false,
                 // Enable High-res (S-chip)
                 0xFF => self.high_resolution = true,
+                // Scroll up N pixels (XO-Chip)
+                0xD0..=0xDF => self.scroll_up(n),
                 // Scroll up N pixels (Unofficial Super Chip)
                 0xB0..=0xBF => self.scroll_up(n),
                 // Scroll down N pixels (Super Chip)
@@ -762,7 +764,7 @@ impl Chirp8 {
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
             if self.high_resolution {
                 scroll
             } else {
@@ -782,7 +784,7 @@ impl Chirp8 {
     /// Scrolls down display by `scroll` pixels.
     fn scroll_down(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
             if self.high_resolution {
                 scroll
             } else {
@@ -800,7 +802,7 @@ impl Chirp8 {
 
     /// Scrolls left display by `scroll` pixels.
     fn scroll_left(&mut self, scroll: u8) {
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
             if self.high_resolution {
                 scroll
             } else {
@@ -817,7 +819,7 @@ impl Chirp8 {
 
     /// Scrolls right display by `scroll` pixels.
     fn scroll_right(&mut self, scroll: u8) {
-        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern {
+        let actual_scroll = if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip{
             if self.high_resolution {
                 scroll
             } else {
