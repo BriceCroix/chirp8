@@ -13,14 +13,14 @@ fn print_display(buffer: &[[bool; chirp8::DISPLAY_WIDTH]; chirp8::DISPLAY_HEIGHT
 }
 
 fn acknowledge_keypress(emulator: &mut chirp8::Chirp8, key: u8) {
-    const AKNOWLEDGE_STEPS: usize = 1000;
+    const ACKNOWLEDGE_FRAMES: usize = 100;
     emulator.key_press(key);
-    for _ in 0..AKNOWLEDGE_STEPS {
-        emulator.step();
+    for _ in 0..ACKNOWLEDGE_FRAMES {
+        emulator.run_frame();
     }
     emulator.key_release(key);
-    for _ in 0..AKNOWLEDGE_STEPS {
-        emulator.step();
+    for _ in 0..ACKNOWLEDGE_FRAMES {
+        emulator.run_frame();
     }
 }
 
@@ -124,8 +124,8 @@ fn quirks_chip_8() {
     let key = 1;
     acknowledge_keypress(&mut emulator, key);
 
-    for _ in 0..3000 {
-        emulator.step();
+    for _ in 0..300 {
+        emulator.run_frame();
     }
     print_display(emulator.get_display_buffer());
 
@@ -154,8 +154,8 @@ fn quirks_super_chip_1_1() {
     let key = 2;
     acknowledge_keypress(&mut emulator, key);
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
     print_display(emulator.get_display_buffer());
 
@@ -185,8 +185,8 @@ fn quirks_super_chip_modern() {
     let key = 1;
     acknowledge_keypress(&mut emulator, key);
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
     print_display(emulator.get_display_buffer());
 
@@ -246,8 +246,8 @@ fn scrolling_hires_1_1() {
     acknowledge_keypress(&mut emulator, key);
     //print_display(emulator.get_display_buffer());
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
     print_display(emulator.get_display_buffer());
 
@@ -279,8 +279,8 @@ fn scrolling_lores_1_1() {
     let key = 2;
     acknowledge_keypress(&mut emulator, key);
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
 
     let display = emulator.get_display_buffer();
@@ -312,8 +312,8 @@ fn scrolling_hires_modern() {
     acknowledge_keypress(&mut emulator, key);
     //print_display(emulator.get_display_buffer());
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
     print_display(emulator.get_display_buffer());
 
@@ -345,8 +345,8 @@ fn scrolling_lores_modern() {
     let key = 1;
     acknowledge_keypress(&mut emulator, key);
 
-    for _ in 0..5000 {
-        emulator.step();
+    for _ in 0..500 {
+        emulator.run_frame();
     }
 
     let display = emulator.get_display_buffer();

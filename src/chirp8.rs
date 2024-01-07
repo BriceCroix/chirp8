@@ -73,11 +73,6 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
 pub const REFRESH_RATE_HZ: usize = 60;
-/// Number of CPU steps executed between two consecutive frames.
-/// Also dictates the number of steps between two timer decreases.
-const STEPS_PER_FRAME: usize = 10; // TODO : make this a parameter.
-/// Number of CPU steps executed each second.
-pub const STEPS_PER_SECOND: usize = STEPS_PER_FRAME * REFRESH_RATE_HZ;
 /// Number of RPL flags registers on the HP48.
 const RPL_REGISTERS_COUNT: usize = 8;
 /// Number of memory bytes read by CPU at each cycle.
@@ -138,6 +133,9 @@ pub struct Chirp8 {
     randomizer: SmallRng,
     /// Number of taken steps. This is not incremented if the interpreter is idle.
     steps: usize,
+    /// Number of CPU steps executed between two consecutive frames.
+    /// Also dictates the number of steps between two timer decreases.
+    steps_per_frame: usize,
 }
 
 impl Default for Chirp8 {
@@ -158,6 +156,12 @@ impl Chirp8 {
         ram[FONT_SPRITES_HIGH_ADDRESS..FONT_SPRITES_HIGH_ADDRESS + FONT_SPRITES_HIGH_SIZE]
             .copy_from_slice(&FONT_SPRITES_HIGH);
 
+        let steps_per_frame = match mode{
+            Chirp8Mode::CosmacChip8 => 10,
+            Chirp8Mode::SuperChip1_1 => 30,
+            Chirp8Mode::SuperChipModern => 30,
+        };
+
         // Create emulator
         Self {
             ram: ram,
@@ -177,6 +181,7 @@ impl Chirp8 {
             display_changed: true,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
             steps:0,
+            steps_per_frame :steps_per_frame,
         }
     }
 
@@ -204,7 +209,7 @@ impl Chirp8 {
 
     /// Run as many instruction as necessary to generate a frame.
     pub fn run_frame(&mut self) {
-        for _ in 0..STEPS_PER_FRAME {
+        for _ in 0..self.steps_per_frame {
             self.step();
         }
     }
@@ -547,7 +552,7 @@ impl Chirp8 {
 
     fn step_timers(&mut self) {
         self.steps_since_frame += 1;
-        if self.steps_since_frame == STEPS_PER_FRAME {
+        if self.steps_since_frame >= self.steps_per_frame {
             self.steps_since_frame = 0;
             self.delay_timer = self.delay_timer.saturating_sub(1);
             self.sound_timer = self.sound_timer.saturating_sub(1);
