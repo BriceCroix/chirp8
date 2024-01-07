@@ -33,9 +33,7 @@ fn ibm_logo() {
     let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
 
     emulator.load_rom(rom);
-    for _ in 0..20 {
-        emulator.step();
-    }
+    emulator.take_steps(20);
     print_display(emulator.get_display_buffer());
 
     let display = emulator.get_display_buffer();
@@ -56,9 +54,7 @@ fn chip8_logo() {
     let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
 
     emulator.load_rom(rom);
-    for _ in 0..39 {
-        emulator.step();
-    }
+    emulator.take_steps(39);
     print_display(emulator.get_display_buffer());
 
     let display = emulator.get_display_buffer();
@@ -80,9 +76,7 @@ fn corax() {
 
     emulator.load_rom(rom);
     // Although undocumented, this test has to run for 284 steps to render entirely
-    for _ in 0..284 {
-        emulator.step();
-    }
+    emulator.take_steps(284);
     print_display(emulator.get_display_buffer());
 
     let display = emulator.get_display_buffer();
@@ -104,9 +98,7 @@ fn flags() {
 
     emulator.load_rom(rom);
     // Although undocumented, this test has to run for 952 steps to render entirely
-    for _ in 0..952 {
-        emulator.step();
-    }
+    emulator.take_steps(952);
     print_display(emulator.get_display_buffer());
 
     let display = emulator.get_display_buffer();

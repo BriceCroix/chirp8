@@ -112,8 +112,11 @@ pub struct Chirp8 {
     pc: u16,
     /// Index register, "I".
     index: u16,
+    /// Stack used for calling subroutines.
     stack: Stack<u16, STACK_SIZE>,
+    /// Sound timer, sound is not when non zero.
     sound_timer: u8,
+    /// Delay timer used by programs to keep count of time.
     delay_timer: u8,
     /// Persistent RPL flags registers.
     rpl_registers: [u8; RPL_REGISTERS_COUNT],
@@ -131,8 +134,10 @@ pub struct Chirp8 {
     steps_since_frame: usize,
     /// Meta flag to indicate that the display changed.
     display_changed: bool,
-    /// Random numbers generator
+    /// Random numbers generator.
     randomizer: SmallRng,
+    /// Number of taken steps. This is not incremented if the interpreter is idle.
+    steps: usize,
 }
 
 impl Default for Chirp8 {
@@ -171,6 +176,7 @@ impl Chirp8 {
             steps_since_frame: 0,
             display_changed: true,
             randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
+            steps:0,
         }
     }
 
@@ -220,11 +226,25 @@ impl Chirp8 {
         }
     }
 
-    /// Execute one machine instruction.
+    /// Forces the interpreter to take given number of `steps`.
+    /// `step()` may be called more times than `steps` parameter, due to interpreter being idle in certain conditions.
+    /// In most cases, do not use this method, prefer `run_frame` or just `step`.
+    pub fn take_steps(&mut self, steps: usize)
+    {
+        let target_steps = self.steps.wrapping_add(steps);
+        while self.steps != target_steps{
+            self.step();
+        }
+    }
+
+    /// Execute one machine instruction, decrement timers if necessary.
+    /// If the interpreter is in idle, if waitinf for an interrupt for instance, the step is not taken,
+    /// which is to say the `steps` counter is not incremented.
     pub fn step(&mut self) {
         // Big endian instruction
         let instruction = self.next_instruction();
         self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+        self.steps = self.steps.wrapping_add(1);
 
         // See https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
         let opcode = 0xF & (instruction >> 12) as u8;
@@ -397,8 +417,23 @@ impl Chirp8 {
             0xC => self.registers[x] = (self.randomizer.next_u32() as u8) & nn,
             // Display
             0xD => {
-                self.handle_display_wait();
-                self.display((self.registers[x], self.registers[y]), n)
+                // Handle the "display wait" quirk. If enabled, the CPU waits for the next v-blank interrupt,
+                // so the step is not taken and the program counter is not incremented.
+                // This quirk is only enabled on original Chip 8 and low-resolution (low-speed) super-chip.
+                // See : https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
+                let wait_enabled = self.mode == Chirp8Mode::CosmacChip8
+                    || (self.mode == Chirp8Mode::SuperChip1_1 && !self.high_resolution);
+
+                if wait_enabled {
+                    if self.steps_since_frame != 0{                   
+                        self.pc = self.pc.wrapping_sub(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                        self.steps = self.steps.wrapping_sub(1);
+                    }else{
+                        self.display((self.registers[x], self.registers[y]), n);
+                    }
+                }else{
+                    self.display((self.registers[x], self.registers[y]), n);
+                }
             }
             // Skip if key
             0xE => match nn {
@@ -537,28 +572,6 @@ impl Chirp8 {
             }
         }
         Option::None
-    }
-
-    /// Handle the *display wait quirk* before displaying anything.
-    /// - The Cosmac chip-8 waits the display interrupt before displaying.
-    /// - The original Super chip (legacy) waits but only in low-resolution.
-    /// - The *modern* Super chip never waits.
-    /// This method implements the original cosmac and the "modern" super-chip behaviors.
-    fn handle_display_wait(&mut self) {
-        // See : https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
-
-        let wait_enabled = self.mode == Chirp8Mode::CosmacChip8
-            || (self.mode == Chirp8Mode::SuperChip1_1 && !self.high_resolution);
-
-        if wait_enabled {
-            // Wait for next frame, but instead of waiting, shortcut time.
-            // The other option is to decrement pc if steps_since_frame is not 0,
-            // But that messes with the number of steps required to do something,
-            // as 10 steps would be necessary to only execute a draw.
-            while self.steps_since_frame != 0 {
-                self.step_timers();
-            }
-        }
     }
 
     /// Display `height`-pixel tall sprite pointed by index register at given `x_y_coordinates`.
