@@ -3,18 +3,32 @@ pub enum StackError {
     StackEmpty, // When popping
 }
 
+#[cfg(feature = "alloc")]
+type StackData<T, const N: usize> = alloc::vec::Vec<T>;
+#[cfg(not(feature = "alloc"))]
+type StackData<T, const N: usize> = [T; N];
+
 /// Fixed-size stack storing at most `N` elements of type `T`.
 pub struct Stack<T: Default + Copy, const N: usize> {
     /// Actual stack.
-    data: [T; N],
+    data: StackData<T, N>,
     /// Where the next data is to be pushed.
     ptr: usize,
 }
 
 impl<T: Default + Copy, const N: usize> Default for Stack<T, N> {
     fn default() -> Self {
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "alloc")]{
+                let data = alloc::vec![T::default(); N];
+            }else{
+                let data = [T::default(); N];
+            }
+        }
+
         Self {
-            data: [Default::default(); N],
+            data: data,
             ptr: 0,
         }
     }

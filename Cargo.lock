@@ -180,6 +180,7 @@ name = "chirp8"
 version = "0.1.0"
 dependencies = [
  "bmp",
+ "cfg-if",
  "getopts",
  "piston",
  "piston2d-graphics",

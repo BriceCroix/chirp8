@@ -1,5 +1,4 @@
 use core::cmp::min;
-
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 
@@ -78,6 +77,20 @@ const RPL_REGISTERS_COUNT: usize = 8;
 /// Number of memory bytes read by CPU at each cycle.
 const PROGRAM_COUNTER_STEP: u16 = 2;
 
+// Create type aliases depending on if the heap is available or not.
+// cfg_if is not used here in order to provide type hints in IDEs.
+
+#[cfg(feature = "alloc")]
+pub type DisplayBuffer = alloc::vec::Vec<alloc::vec::Vec<bool>>;
+#[cfg(not(feature = "alloc"))]
+pub type DisplayBuffer = [[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+
+#[cfg(feature = "alloc")]
+type Ram = alloc::vec::Vec<u8>;
+#[cfg(not(feature = "alloc"))]
+type Ram = [u8; RAM_SIZE];
+
+
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
 #[derive(PartialEq)]
@@ -98,9 +111,10 @@ pub enum Chirp8Mode {
 
 /// Chip-8 Emulator.
 pub struct Chirp8 {
-    ram: [u8; RAM_SIZE],
+    /// Memory of interpreter.
+    ram: Ram,
     /// Display buffer, true when pixel is on, false otherwise.
-    display_buffer: [[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT],
+    display_buffer: DisplayBuffer,
     /// V0 to VF.
     registers: [u8; REGISTERS_COUNT],
     /// Program counter.
@@ -109,7 +123,7 @@ pub struct Chirp8 {
     index: u16,
     /// Stack used for calling subroutines.
     stack: Stack<u16, STACK_SIZE>,
-    /// Sound timer, sound is not when non zero.
+    /// Sound timer, sound is on when non zero.
     sound_timer: u8,
     /// Delay timer used by programs to keep count of time.
     delay_timer: u8,
@@ -147,8 +161,18 @@ impl Default for Chirp8 {
 impl Chirp8 {
     /// Creates a new emulator, which will behave according to given `mode`.
     pub fn new(mode: Chirp8Mode) -> Self {
+        // Create RAM and display buffer
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "alloc")]{
+                let mut ram = alloc::vec![0u8; RAM_SIZE];
+                let display_buffer = alloc::vec![alloc::vec![false; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+            }else{
+                let mut ram = [0u8; RAM_SIZE];
+                let display_buffer = [[false; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+            }
+        }
+
         // Load font to RAM
-        let mut ram = [0u8; RAM_SIZE];
         const FONT_SPRITES_SIZE: usize = FONT_SPRITES_COUNT * FONT_SPRITES_STEP;
         ram[FONT_SPRITES_ADDRESS..FONT_SPRITES_ADDRESS + FONT_SPRITES_SIZE]
             .copy_from_slice(&FONT_SPRITES);
@@ -165,7 +189,7 @@ impl Chirp8 {
         // Create emulator
         Self {
             ram: ram,
-            display_buffer: [[false; DISPLAY_WIDTH]; DISPLAY_HEIGHT],
+            display_buffer: display_buffer,
             registers: [0; REGISTERS_COUNT],
             pc: PROGRAM_START as u16,
             index: 0,
@@ -792,7 +816,7 @@ impl Chirp8 {
     /// Returns a reference to the internal display buffer.
     /// Notice that when running on Cosmac mode, each "pixel" is displayed as a 2 by 2 square,
     /// in order to match the resolution of the Super-Chip mode.
-    pub fn get_display_buffer(&self) -> &[[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT] {
+    pub fn get_display_buffer(&self) -> &DisplayBuffer {
         &self.display_buffer
     }
 }

@@ -1,4 +1,4 @@
-fn print_display(buffer: &[[bool; chirp8::DISPLAY_WIDTH]; chirp8::DISPLAY_HEIGHT]) {
+fn print_display(buffer: &chirp8::DisplayBuffer) {
     for row in buffer {
         for pixel in row {
             if *pixel {
