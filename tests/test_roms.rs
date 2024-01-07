@@ -209,6 +209,34 @@ fn quirks_super_chip_modern() {
 }
 
 #[test]
+fn keypad_fx0a() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/6-keypad.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::default();
+
+    emulator.load_rom(rom);
+    // Use test FX0A
+    let key = 3;
+    acknowledge_keypress(&mut emulator, key);
+    // Press anything
+    let key = 14;
+    acknowledge_keypress(&mut emulator, key);
+
+    print_display(emulator.get_display_buffer());
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/keypad_FX0A.bmp").unwrap();
+
+    for i in 0..64 {
+        for j in 0..128 {
+            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
+        }
+    }
+}
+
+#[test]
 fn scrolling_hires_1_1() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");

@@ -120,6 +120,8 @@ pub struct Chirp8 {
 
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT as usize],
+    /// The keys state at the last cpu state. Used to know when a key is just pressed or released.
+    keys_previous: [bool; KEYS_COUNT as usize],
     /// On Super Chip 8, true when high-resolution is enabled.
     high_resolution: bool,
 
@@ -163,6 +165,7 @@ impl Chirp8 {
             delay_timer: 0,
             rpl_registers: [0; RPL_REGISTERS_COUNT],
             keys: [false; KEYS_COUNT as usize],
+            keys_previous: [false; KEYS_COUNT as usize],
             high_resolution: false,
             mode: mode,
             steps_since_frame: 0,
@@ -431,8 +434,7 @@ impl Chirp8 {
                     }
                     // Get Key
                     0x0A => {
-                        // TODO : should wait for a key release.
-                        if let Option::Some(key) = self.get_first_key() {
+                        if let Option::Some(key) = self.get_first_key_released() {
                             self.registers[x] = key;
                         } else {
                             self.pc -= 2;
@@ -504,6 +506,8 @@ impl Chirp8 {
         }
         // Handle timers
         self.step_timers();
+        // Handle keys
+        self.keys_previous.copy_from_slice(&self.keys);
     }
 
     fn step_timers(&mut self) {
@@ -525,10 +529,10 @@ impl Chirp8 {
         self.registers[0xF] = 0;
     }
 
-    /// Returns the first pressed key index, between 0 and 15 included, or `Option::None` when nothing is pressed.
-    fn get_first_key(&self) -> Option<u8> {
-        for (index, key) in self.keys.iter().enumerate() {
-            if *key {
+    /// Returns the first key just released, between 0 and 15 included, or `Option::None` when nothing has changed.
+    fn get_first_key_released(&self) -> Option<u8> {
+        for (index, (key, key_previous)) in self.keys.iter().zip(self.keys_previous.iter()).enumerate() {
+            if *key_previous && !*key{
                 return Option::Some(index as u8);
             }
         }
