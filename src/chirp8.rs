@@ -4,10 +4,15 @@ use rand::{RngCore, SeedableRng};
 
 use super::stack::Stack;
 
-/// Number of elements storable in the emulator's stack (at least 16)
-const STACK_SIZE: usize = 32;
-/// The whole emulator's memory is RAM.
+/// Number of elements storable in the emulator's stack (originally 12, 16 from super chip and above).
+const STACK_SIZE: usize = 16;
+/// The whole emulator's memory is RAM : 12-bits addresses.
+#[cfg(not(feature = "xochip"))]
 const RAM_SIZE: usize = 0x1000;
+/// The whole emulator's memory is RAM : 16-bits addresses.
+#[cfg(feature = "xochip")]
+const RAM_SIZE: usize = 0x10000;
+/// A mask to use on addresses.
 const RAM_MASK: u16 = (RAM_SIZE - 1) as u16;
 /// Every Program should start at this address.
 const PROGRAM_START: usize = 0x200;
@@ -107,8 +112,12 @@ pub enum Chirp8Mode {
     /// Does not feature the "half scroll" quirk as well, where the original interpreter would
     /// allow to scroll half pixels when in low-resolution.
     SuperChipModern,
-    // TODO : XOChip,
-    // TODO SuperChip1_0
+    /// Octo XO-Chip extension from 2014. Uses 4-color 128x64 display.
+    XOChip,
+
+    // Should be implemented :
+    // Chip48
+    // SuperChip1_0
 }
 
 /// Chip-8 Emulator.
@@ -274,7 +283,7 @@ impl Chirp8 {
     pub fn step(&mut self) {
         // Big endian instruction
         let instruction = self.next_instruction();
-        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+        self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
         self.steps = self.steps.wrapping_add(1);
 
         // See https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
@@ -330,27 +339,27 @@ impl Chirp8 {
             // Skip
             0x3 => {
                 if self.registers[x] == nn {
-                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x4 => {
                 if self.registers[x] != nn {
-                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x5 => {
                 // n should be equal to 0 (0x5XY0), not checked for performance.
                 if self.registers[x] == self.registers[y] {
-                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Skip
             0x9 => {
                 // n should be equal to 0 (0x9XY0), not checked for performance.
                 if self.registers[x] != self.registers[y] {
-                    self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK
+                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                 }
             }
             // Set register
@@ -442,7 +451,7 @@ impl Chirp8 {
                     } else {
                         x
                     }] as u16)
-                    & RAM_MASK
+                    & RAM_MASK;
             }
             // Random
             0xC => self.registers[x] = (self.randomizer.next_u32() as u8) & nn,
@@ -472,14 +481,14 @@ impl Chirp8 {
                 0x9E => {
                     let key = (0xF & self.registers[x]) as usize;
                     if self.keys[key] {
-                        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+                        self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                     }
                 }
                 // Skip if VX not pressed
                 0xA1 => {
                     let key = (0xF & self.registers[x]) as usize;
                     if !self.keys[key] {
-                        self.pc = (self.pc + PROGRAM_COUNTER_STEP) & RAM_MASK;
+                        self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
                     }
                 }
                 _ => panic!("Unrecognized E instruction {:x}", instruction),
@@ -492,10 +501,22 @@ impl Chirp8 {
                     0x18 => self.sound_timer = self.registers[x],
                     // Add to index
                     0x1E => {
-                        self.index = self.index + self.registers[x] as u16;
-                        if self.index & !RAM_MASK != 0 {
-                            self.set_flag();
-                            self.index &= RAM_MASK;
+                        if self.mode != Chirp8Mode::XOChip
+                        {
+                            self.index = self.index + self.registers[x] as u16;
+                            // Check 12-bits overflow
+                            if self.index & !RAM_MASK != 0 {
+                                self.set_flag();
+                                self.index &= RAM_MASK;
+                            }
+                        }else{
+                            // Check 16-bits overflow
+                            if let Some(result) = self.index.checked_add(self.registers[x] as u16){
+                                self.index = result;
+                            }else{
+                                self.index = self.index.wrapping_add(self.registers[x] as u16);
+                                self.set_flag();
+                            }
                         }
                     }
                     // Get Key
@@ -503,7 +524,7 @@ impl Chirp8 {
                         if let Option::Some(key) = self.get_first_key_released() {
                             self.registers[x] = key;
                         } else {
-                            self.pc -= 2;
+                            self.pc = self.pc.wrapping_sub(PROGRAM_COUNTER_STEP);
                         }
                     }
                     // FX29: Font character
@@ -623,7 +644,7 @@ impl Chirp8 {
             /// Width and Height of large sprites.
             const LARGE_SPRITE_SIZE: usize = 16;
             /// Bytes per line for large sprites.
-            const BYTES_PER_LINE: usize = 2;
+            const BYTES_PER_LINE: u16 = 2;
 
             // The actual dimensions that fall in the screen boundaries.
             let actual_height = min(
@@ -644,11 +665,11 @@ impl Chirp8 {
                 let mut colliding_line = false;
                 for part in 0..BYTES_PER_LINE {
                     let sprite_address =
-                        (self.index as usize + BYTES_PER_LINE * line + part) & RAM_MASK as usize;
+                        ((self.index.wrapping_add( BYTES_PER_LINE * (line as u16)).wrapping_add(part)) & RAM_MASK) as usize;
                     let sprite = self.ram[sprite_address];
                     let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
-                    for bit in 0..(min(BITS, actual_width - part * BITS)) {
-                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH + part * BITS + bit;
+                    for bit in 0..(min(BITS, actual_width - (part as usize) * BITS)) {
+                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH + (part as usize) * BITS + bit;
 
                         // Should the pixel be flipped or not.
                         let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
@@ -695,7 +716,7 @@ impl Chirp8 {
             }
 
             for line in 0..(actual_height as usize) {
-                let sprite_address = ((self.index + line as u16) & RAM_MASK) as usize;
+                let sprite_address = ((self.index.wrapping_add(line as u16)) & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
                 let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
                 let mut colliding_line = false;
