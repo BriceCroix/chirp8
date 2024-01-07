@@ -15,10 +15,11 @@ pub struct App {
     emulator: Chirp8,
     window: Window,
     paused: bool,
+    keyboard_layout: KeyboardLayout,
 }
 
 impl App {
-    fn new(rom: &[u8], mode: chirp8::Chirp8Mode) -> App {
+    fn new(rom: &[u8], mode: chirp8::Chirp8Mode, keyboard_layout: KeyboardLayout) -> App {
         const WIDTH: u32 = (chirp8::DISPLAY_WIDTH * PIXELS_PER_CELL) as u32;
         const HEIGHT: u32 = (chirp8::DISPLAY_HEIGHT * PIXELS_PER_CELL) as u32;
 
@@ -41,6 +42,7 @@ impl App {
             emulator: Chirp8::new(mode),
             window: window,
             paused: false,
+            keyboard_layout: keyboard_layout,
         };
         app.emulator.load_rom(rom);
         app
@@ -94,30 +96,71 @@ impl App {
 
     /// `pressed` is true when the key is pressed and false when released.
     fn process_keyboard(&mut self, key: Key, pressed: bool) {
-        match key {
+        match self.keyboard_layout
+        {
             // QWERTY layout
-            Key::D1 => self.emulator.key_set(0x1, pressed),
-            Key::D2 => self.emulator.key_set(0x2, pressed),
-            Key::D3 => self.emulator.key_set(0x3, pressed),
-            Key::D4 => self.emulator.key_set(0xC, pressed),
-            Key::Q => self.emulator.key_set(0x4, pressed),
-            Key::W => self.emulator.key_set(0x5, pressed),
-            Key::E => self.emulator.key_set(0x6, pressed),
-            Key::R => self.emulator.key_set(0xD, pressed),
-            Key::A => self.emulator.key_set(0x7, pressed),
-            Key::S => self.emulator.key_set(0x8, pressed),
-            Key::D => self.emulator.key_set(0x9, pressed),
-            Key::F => self.emulator.key_set(0xE, pressed),
-            Key::Z => self.emulator.key_set(0xA, pressed),
-            Key::X => self.emulator.key_set(0x0, pressed),
-            Key::C => self.emulator.key_set(0xB, pressed),
-            Key::V => self.emulator.key_set(0xF, pressed),
+            KeyboardLayout::Qwerty => match key {
+                Key::D1 => self.emulator.key_set(0x1, pressed),
+                Key::D2 => self.emulator.key_set(0x2, pressed),
+                Key::D3 => self.emulator.key_set(0x3, pressed),
+                Key::D4 => self.emulator.key_set(0xC, pressed),
+                Key::Q => self.emulator.key_set(0x4, pressed),
+                Key::W => self.emulator.key_set(0x5, pressed),
+                Key::E => self.emulator.key_set(0x6, pressed),
+                Key::R => self.emulator.key_set(0xD, pressed),
+                Key::A => self.emulator.key_set(0x7, pressed),
+                Key::S => self.emulator.key_set(0x8, pressed),
+                Key::D => self.emulator.key_set(0x9, pressed),
+                Key::F => self.emulator.key_set(0xE, pressed),
+                Key::Z => self.emulator.key_set(0xA, pressed),
+                Key::X => self.emulator.key_set(0x0, pressed),
+                Key::C => self.emulator.key_set(0xB, pressed),
+                Key::V => self.emulator.key_set(0xF, pressed),
+                // Discard other keys
+                _ => {}
+            }
+
+            // QWERTY layout
+            KeyboardLayout::Azerty => match key {
+                Key::D1 => self.emulator.key_set(0x1, pressed),
+                Key::D2 => self.emulator.key_set(0x2, pressed),
+                Key::D3 => self.emulator.key_set(0x3, pressed),
+                Key::D4 => self.emulator.key_set(0xC, pressed),
+                Key::A => self.emulator.key_set(0x4, pressed),
+                Key::Z => self.emulator.key_set(0x5, pressed),
+                Key::E => self.emulator.key_set(0x6, pressed),
+                Key::R => self.emulator.key_set(0xD, pressed),
+                Key::Q => self.emulator.key_set(0x7, pressed),
+                Key::S => self.emulator.key_set(0x8, pressed),
+                Key::D => self.emulator.key_set(0x9, pressed),
+                Key::F => self.emulator.key_set(0xE, pressed),
+                Key::W => self.emulator.key_set(0xA, pressed),
+                Key::X => self.emulator.key_set(0x0, pressed),
+                Key::C => self.emulator.key_set(0xB, pressed),
+                Key::V => self.emulator.key_set(0xF, pressed),
+                // Discard other keys
+                _ => {}
+            }
+        }
+        // Common to all layouts
+        match key{
+            // Numeric pad 
+            Key::NumPad7 => self.emulator.key_set(0x1, pressed),
+            Key::NumPad8 => self.emulator.key_set(0x2, pressed),
+            Key::NumPad9 => self.emulator.key_set(0x3, pressed),
+            Key::NumPad4 => self.emulator.key_set(0x4, pressed),
+            Key::NumPad5 => self.emulator.key_set(0x5, pressed),
+            Key::NumPad6 => self.emulator.key_set(0x6, pressed),
+            Key::NumPad1 => self.emulator.key_set(0x7, pressed),
+            Key::NumPad2 => self.emulator.key_set(0x8, pressed),
+            Key::NumPad3 => self.emulator.key_set(0x9, pressed),
+            Key::NumPad0 => self.emulator.key_set(0x0, pressed),
 
             Key::Space => self.paused ^= pressed,
-
             // Discard other keys
             _ => {}
         }
+    
     }
 
     pub fn run(&mut self) {
@@ -144,6 +187,12 @@ impl App {
     }
 }
 
+#[derive(PartialEq)]
+enum KeyboardLayout{
+    Qwerty,
+    Azerty,
+}
+
 /// Read given file path as bytes.
 fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
     // Attempt to open the file
@@ -161,12 +210,13 @@ fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
 }
 
 /// Function to parse program options
-fn parse_arguments(args: &std::vec::Vec<String>) -> chirp8::Chirp8Mode {
+fn parse_arguments(args: &std::vec::Vec<String>) -> (chirp8::Chirp8Mode, KeyboardLayout) {
     let mut opts = getopts::Options::new();
 
     opts.optflag("c", "chip", "Use original Chip-8");
     opts.optflag("s", "super-chip", "Use Super Chip 1.1");
     opts.optflag("m", "modern-super-chip", "Use Modernized Super Chip");
+    opts.optflag("a", "azerty", "Use Azerty keyboard layout instead of Qwerty");
 
     // Parse options
     let matches = match opts.parse(&args[1..]) {
@@ -177,7 +227,7 @@ fn parse_arguments(args: &std::vec::Vec<String>) -> chirp8::Chirp8Mode {
         }
     };
 
-    if matches.opt_present("c") {
+    let mode = if matches.opt_present("c") {
         Chirp8Mode::CosmacChip8
     } else if matches.opt_present("s") {
         Chirp8Mode::SuperChip1_1
@@ -185,7 +235,15 @@ fn parse_arguments(args: &std::vec::Vec<String>) -> chirp8::Chirp8Mode {
         Chirp8Mode::SuperChipModern
     } else {
         Chirp8Mode::CosmacChip8
-    }
+    };
+
+    let layout = if matches.opt_present("a") {
+        KeyboardLayout::Azerty
+    } else {
+        KeyboardLayout::Qwerty
+    };
+
+    (mode, layout)
 }
 
 fn main() {
@@ -198,7 +256,7 @@ fn main() {
         return;
     }
 
-    let mode = parse_arguments(&args);
+    let (mode, layout) = parse_arguments(&args);
 
     // Use the first argument as the rom file path
     let file_path = &args[1];
@@ -206,7 +264,7 @@ fn main() {
     match read_file_bytes(file_path) {
         Ok(rom) => {
             // Create a new app and run it.
-            let mut app = App::new(rom.as_slice(), mode);
+            let mut app = App::new(rom.as_slice(), mode, layout);
             app.run();
         }
         Err(err) => eprintln!("Error reading file: {}", err),
