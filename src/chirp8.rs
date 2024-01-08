@@ -341,27 +341,27 @@ impl Chirp8 {
             // Skip
             0x3 => {
                 if self.registers[x] == nn {
-                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.skip_next_instruction();
                 }
             }
             // Skip
             0x4 => {
                 if self.registers[x] != nn {
-                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.skip_next_instruction();
                 }
             }
             // Skip
             0x5 => {
                 // n should be equal to 0 (0x5XY0), not checked for performance.
                 if self.registers[x] == self.registers[y] {
-                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.skip_next_instruction();
                 }
             }
             // Skip
             0x9 => {
                 // n should be equal to 0 (0x9XY0), not checked for performance.
                 if self.registers[x] != self.registers[y] {
-                    self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                    self.skip_next_instruction();
                 }
             }
             // Set register
@@ -483,20 +483,30 @@ impl Chirp8 {
                 0x9E => {
                     let key = (0xF & self.registers[x]) as usize;
                     if self.keys[key] {
-                        self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                        self.skip_next_instruction();
                     }
                 }
                 // Skip if VX not pressed
                 0xA1 => {
                     let key = (0xF & self.registers[x]) as usize;
                     if !self.keys[key] {
-                        self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP) & RAM_MASK;
+                        self.skip_next_instruction();
                     }
                 }
                 _ => panic!("Unrecognized E instruction {:x}", instruction),
             },
             0xF => {
                 match nn {
+                    // F000 : Load 16-bits adress in index (XO-chip)
+                    0x00 => {
+                        if self.mode == Chirp8Mode::XOChip && x == 0 {
+                            // The next "instruction" is actually a 16-bits address
+                            self.index = self.next_instruction();
+                            self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP);
+                        } else {
+                            panic!("Unrecognized F instruction {:x}", instruction)
+                        }
+                    }
                     // Timers set VX
                     0x07 => self.registers[x] = self.delay_timer,
                     0x15 => self.delay_timer = self.registers[x],
@@ -613,6 +623,19 @@ impl Chirp8 {
             self.delay_timer = self.delay_timer.saturating_sub(1);
             self.sound_timer = self.sound_timer.saturating_sub(1);
         }
+    }
+
+    fn skip_next_instruction(&mut self) {
+        const LOAD_LARGE_INDEX_OPCODE: u16 = 0xF000;
+        let offset = if self.mode == Chirp8Mode::XOChip
+            && self.next_instruction() == LOAD_LARGE_INDEX_OPCODE
+        {
+            // Jump over 4 bytes instructions
+            PROGRAM_COUNTER_STEP * 2
+        } else {
+            PROGRAM_COUNTER_STEP
+        };
+        self.pc = self.pc.wrapping_add(offset) & RAM_MASK;
     }
 
     #[inline]
