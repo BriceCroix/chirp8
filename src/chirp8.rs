@@ -350,11 +350,41 @@ impl Chirp8 {
                     self.skip_next_instruction();
                 }
             }
-            // Skip
             0x5 => {
-                // n should be equal to 0 (0x5XY0), not checked for performance.
-                if self.registers[x] == self.registers[y] {
-                    self.skip_next_instruction();
+                match n {
+                    // 0x5XY0 : Skip if vx == vy
+                    0 => {
+                        if self.registers[x] == self.registers[y] {
+                            self.skip_next_instruction();
+                        }
+                    }
+                    // 0x5XY2 : Save vx - vy (XO-chip)
+                    2 => {
+                        if x < y {
+                            let end = self.index as usize + y - x;
+                            self.ram[self.index as usize..=end]
+                                .copy_from_slice(&self.registers[x..=y]);
+                        } else {
+                            let end = self.index as usize + x - y;
+                            self.ram[self.index as usize..=end]
+                                .copy_from_slice(&self.registers[y..=x]);
+                            self.ram[self.index as usize..=end].reverse();
+                        }
+                    }
+                    // 0x5XY3 : Load vx - vy (XO-chip)
+                    3 => {
+                        if x < y {
+                            let end = self.index as usize + y - x;
+                            self.registers[x..=y]
+                                .copy_from_slice(&self.ram[self.index as usize..=end]);
+                        } else {
+                            let end = self.index as usize + x - y;
+                            self.registers[y..=x]
+                                .copy_from_slice(&self.ram[self.index as usize..=end]);
+                            self.registers[y..=x].reverse();
+                        }
+                    }
+                    _ => panic!("Unrecognized (0x5) instruction {:x}", n),
                 }
             }
             // Skip
@@ -441,7 +471,7 @@ impl Chirp8 {
                     self.registers[x] <<= 1;
                     self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
-                _ => panic!("Unrecognized logic instruction {:x}", n),
+                _ => panic!("Unrecognized logic (0x8) instruction {:x}", n),
             },
             // Set index
             0xA => self.index = nnn,
@@ -1143,6 +1173,64 @@ mod test {
         assert_eq!(emulator.display_buffer[62][17], false);
         assert_eq!(emulator.display_buffer[63][17], false);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 3);
+    }
+
+    #[test]
+    fn opcode_save_range() {
+        // 0x5XY2
+        let rom = [
+            0x56, 0x92, // Save v6 v9
+            0x59, 0x62, // Save v9 v6
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.registers[6..=9].copy_from_slice(&[3, 7, 13, 59]);
+        emulator.index = 0x0ABC;
+
+        emulator.step();
+        assert_eq!(emulator.ram[0xABC], 3);
+        assert_eq!(emulator.ram[0xABC + 1], 7);
+        assert_eq!(emulator.ram[0xABC + 2], 13);
+        assert_eq!(emulator.ram[0xABC + 3], 59);
+        assert_eq!(emulator.index, 0xABC);
+
+        emulator.step();
+        assert_eq!(emulator.ram[0xABC], 59);
+        assert_eq!(emulator.ram[0xABC + 1], 13);
+        assert_eq!(emulator.ram[0xABC + 2], 7);
+        assert_eq!(emulator.ram[0xABC + 3], 3);
+        assert_eq!(emulator.index, 0xABC);
+    }
+
+    #[test]
+    fn opcode_load_range() {
+        // 0x5XY3
+        let rom = [
+            0x56, 0x93, // Load v6 v9
+            0x59, 0x63, // Load v9 v6
+            0x07, 0x54, 0x23, 0xDA, // 4 bytes of data
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.index = PROGRAM_START as u16 + 4;
+
+        emulator.step();
+        assert_eq!(emulator.registers[6], 0x07);
+        assert_eq!(emulator.registers[7], 0x54);
+        assert_eq!(emulator.registers[8], 0x23);
+        assert_eq!(emulator.registers[9], 0xDA);
+        assert_eq!(emulator.index, PROGRAM_START as u16 + 4);
+
+        emulator.step();
+        assert_eq!(emulator.registers[6], 0xDA);
+        assert_eq!(emulator.registers[7], 0x23);
+        assert_eq!(emulator.registers[8], 0x54);
+        assert_eq!(emulator.registers[9], 0x07);
+        assert_eq!(emulator.index, PROGRAM_START as u16 + 4);
     }
 
     // TODO : test other opcodes
