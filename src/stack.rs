@@ -18,7 +18,6 @@ pub struct Stack<T: Default + Copy, const N: usize> {
 
 impl<T: Default + Copy, const N: usize> Default for Stack<T, N> {
     fn default() -> Self {
-
         cfg_if::cfg_if! {
             if #[cfg(feature = "alloc")]{
                 let data = alloc::vec![T::default(); N];
@@ -27,10 +26,7 @@ impl<T: Default + Copy, const N: usize> Default for Stack<T, N> {
             }
         }
 
-        Self {
-            data: data,
-            ptr: 0,
-        }
+        Self { data: data, ptr: 0 }
     }
 }
 

@@ -59,7 +59,6 @@ impl App {
         use graphics::*;
 
         const COLOR_OFF: Color = [0.0, 0.0, 0.0, 1.0];
-        const COLOR_ON: Color = [1.0, 1.0, 1.0, 1.0];
 
         self.window.draw_2d(event, |c, g, _device| {
             // Draw red background if sound.
@@ -77,10 +76,11 @@ impl App {
             // Draw a square for "on" pixel
             for i in 0..DISPLAY_HEIGHT {
                 for j in 0..DISPLAY_WIDTH {
-                    if emulator_screen[i][j] {
+                    if emulator_screen[i][j] != 0{
+                        let color = emulator_screen[i][j] as f32;
                         let (i_px, j_px) = Self::get_cell_pixel_coordinates(i, j);
                         rectangle(
-                            COLOR_ON,
+                            [color, color, color, 255f32],
                             rectangle::square(0.0, 0.0, PIXELS_PER_CELL as f64),
                             c.transform.trans(j_px as f64, i_px as f64),
                             g,

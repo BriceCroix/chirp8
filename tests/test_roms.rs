@@ -1,7 +1,9 @@
+use chirp8::{DISPLAY_HEIGHT, DISPLAY_WIDTH};
+
 fn print_display(buffer: &chirp8::DisplayBuffer) {
     for row in buffer {
         for pixel in row {
-            if *pixel {
+            if *pixel != 0 {
                 print!("\u{25A0}");
             } else {
                 print!("-");
@@ -10,6 +12,14 @@ fn print_display(buffer: &chirp8::DisplayBuffer) {
         println!();
     }
     println!();
+}
+
+fn assert_screen_eq(buffer: &chirp8::DisplayBuffer, expected: &bmp::Image) {
+    for i in 0..DISPLAY_HEIGHT {
+        for j in 0..DISPLAY_WIDTH {
+            assert_eq!(buffer[i][j], expected.get_pixel(j as u32, i as u32).r);
+        }
+    }
 }
 
 fn acknowledge_keypress(emulator: &mut chirp8::Chirp8, key: u8) {
@@ -38,11 +48,7 @@ fn ibm_logo() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/ibm_logo.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -59,11 +65,7 @@ fn chip8_logo() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/chip8_logo.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -81,11 +83,7 @@ fn corax() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/corax+.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -103,11 +101,7 @@ fn flags() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/flags.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -131,11 +125,7 @@ fn quirks_chip_8() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_chip8.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -162,11 +152,7 @@ fn quirks_super_chip_1_1() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_super_chip_legacy.bmp").unwrap();
 
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -193,11 +179,7 @@ fn quirks_super_chip_modern() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_super_chip_modern.bmp").unwrap();
 
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -221,11 +203,7 @@ fn keypad_fx0a() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/keypad_FX0A.bmp").unwrap();
 
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -253,11 +231,7 @@ fn scrolling_hires_1_1() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -287,11 +261,7 @@ fn scrolling_lores_1_1() {
     let expected = bmp::open("tests/scrolling_lores.bmp").unwrap();
     print_display(display);
 
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -319,11 +289,7 @@ fn scrolling_hires_modern() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }
 
 #[test]
@@ -353,9 +319,5 @@ fn scrolling_lores_modern() {
     let expected = bmp::open("tests/scrolling_lores.bmp").unwrap();
     print_display(display);
 
-    for i in 0..64 {
-        for j in 0..128 {
-            assert_eq!(display[i][j], expected.get_pixel(j as u32, i as u32).r != 0);
-        }
-    }
+    assert_screen_eq(display, &expected);
 }

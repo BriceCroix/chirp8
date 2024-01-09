@@ -20,7 +20,7 @@ fn main() {
 
     for row in display {
         for pixel in row {
-            if *pixel {
+            if *pixel == chirp8::PIXEL_ON{
                 print!("\u{25A0}");
             } else {
                 print!("-");

@@ -18,10 +18,6 @@ const RAM_MASK: u16 = (RAM_SIZE - 1) as u16;
 const PROGRAM_START: usize = 0x200;
 /// The maximum size a program can use.
 pub const PROGRAM_SIZE: usize = RAM_SIZE - PROGRAM_START;
-/// Maximum display width, used by Super-chip and XO-chip.
-pub const DISPLAY_WIDTH: usize = 128;
-/// Maximum display height, used by Super-chip and XO-chip.
-pub const DISPLAY_HEIGHT: usize = 64;
 /// Number of registers used by the emulator.
 const REGISTERS_COUNT: usize = 16;
 /// The index of the flag used as a flag register.
@@ -69,12 +65,18 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, // 7
     0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, // 8
     0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C, // 9
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // A (absent)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // B (absent)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // C (absent)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // D (absent)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // E (absent)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // F (absent)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // A (absent) // TODO for XO-Chip
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // B (absent) // TODO for XO-Chip
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // C (absent) // TODO for XO-Chip
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // D (absent) // TODO for XO-Chip
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // E (absent) // TODO for XO-Chip
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, // F (absent) // TODO for XO-Chip
 ];
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
@@ -84,18 +86,40 @@ const RPL_REGISTERS_COUNT: usize = 8;
 /// Number of memory bytes read by CPU at each cycle.
 const PROGRAM_COUNTER_STEP: u16 = 2;
 
+/// Maximum display width, used by Super-chip and XO-chip.
+pub const DISPLAY_WIDTH: usize = 128;
+/// Maximum display height, used by Super-chip and XO-chip.
+pub const DISPLAY_HEIGHT: usize = 64;
+/// The value of pixel not set, when not in XO-Chip.
+pub const PIXEL_OFF: u8 = 0x00;
+/// The value of pixel set, when not in XO-Chip.
+pub const PIXEL_ON: u8 = 0xFF;
+/// The value to add to a pixel to get the next value, on XO-Chip.
+/// For 2 display planes, this yields 85 : 0, 85 170, 255.
+pub const PIXEL_STEP: u8 = repeat_bits(1, DISPLAY_PLANES);
+/// Number of display planes used by XO-Chip.
+const DISPLAY_PLANES: usize = 2;
+
 // Create type aliases depending on if the heap is available or not.
 // cfg_if is not used here in order to provide type hints in IDEs.
 
 #[cfg(feature = "alloc")]
-pub type DisplayBuffer = alloc::vec::Vec<alloc::vec::Vec<bool>>;
+pub type DisplayBuffer = alloc::vec::Vec<alloc::vec::Vec<u8>>;
 #[cfg(not(feature = "alloc"))]
-pub type DisplayBuffer = [[bool; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+pub type DisplayBuffer = [[u8; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
 
 #[cfg(feature = "alloc")]
 type Ram = alloc::vec::Vec<u8>;
 #[cfg(not(feature = "alloc"))]
 type Ram = [u8; RAM_SIZE];
+
+/// Repeats the `count` least-significant bits of `value` on following bits.
+/// See [test::test_repeat_bits].
+const fn repeat_bits(value: u8, count: usize) -> u8 {
+    let step = u8::MAX as u8 / ((1 << count) - 1);
+    let mask = (1 << count) - 1;
+    (value & mask).wrapping_mul(step)
+}
 
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
@@ -143,8 +167,15 @@ pub struct Chirp8 {
     keys: [bool; KEYS_COUNT as usize],
     /// The keys state at the last cpu state. Used to know when a key is just pressed or released.
     keys_previous: [bool; KEYS_COUNT as usize],
-    /// On Super Chip 8, true when high-resolution is enabled.
+    /// On Super Chip 8 and above, true when high-resolution is enabled.
     high_resolution: bool,
+    /// On XO-Chip, bitmask of the selected planes.
+    /// All bits are used ! For P planes (2 on XO-Chip), these bits are repeated every P bits :
+    /// - P=1 : [0b00000000, 0b11111111]
+    /// - P=2 : [0b00_00_00_00, 0b01_01_01_01, 0b10_10_10_10, 0b11_11_11_11]
+    /// - P=4 : [0b0000_0000, 0b0001_0001, 0b0010_0010, 0b0011_0011, 0b0100_0100, ..., 0b1110_1110, 0b1111_1111]
+    /// This allows for 2^P values equally distant and filling all 0..255 range.
+    plane_selection: u8,
 
     /// The current running mode of the emulator.
     mode: Chirp8Mode,
@@ -174,10 +205,10 @@ impl Chirp8 {
         cfg_if::cfg_if! {
             if #[cfg(feature = "alloc")]{
                 let mut ram = alloc::vec![0u8; RAM_SIZE];
-                let display_buffer = alloc::vec![alloc::vec![false; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+                let display_buffer = alloc::vec![alloc::vec![PIXEL_OFF; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
             }else{
                 let mut ram = [0u8; RAM_SIZE];
-                let display_buffer = [[false; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
+                let display_buffer = [[PIXEL_OFF; DISPLAY_WIDTH]; DISPLAY_HEIGHT];
             }
         }
 
@@ -196,6 +227,14 @@ impl Chirp8 {
             Chirp8Mode::XOChip => 30,
         };
 
+        let plane_selection = if mode == Chirp8Mode::XOChip {
+            // First plane selected, repeated 4 times.
+            repeat_bits(0b01, DISPLAY_PLANES)
+        } else {
+            // Draw on all planes.
+            repeat_bits(1, 1)
+        };
+
         // Create emulator
         Self {
             ram: ram,
@@ -210,6 +249,7 @@ impl Chirp8 {
             keys: [false; KEYS_COUNT as usize],
             keys_previous: [false; KEYS_COUNT as usize],
             high_resolution: false,
+            plane_selection: plane_selection,
             mode: mode,
             steps_since_frame: 0,
             display_changed: true,
@@ -261,7 +301,7 @@ impl Chirp8 {
         self.registers.fill(0);
         self.display_changed = true;
         for row in &mut self.display_buffer {
-            row.fill(false);
+            row.fill(PIXEL_OFF);
         }
     }
 
@@ -307,8 +347,12 @@ impl Chirp8 {
                 // 0x10..=0x1F => self.reset(),
                 // Clear screen
                 0xE0 => {
-                    for row in &mut self.display_buffer {
-                        row.fill(false)
+                    if self.mode != Chirp8Mode::XOChip {
+                        for row in &mut self.display_buffer {
+                            row.fill(PIXEL_OFF)
+                        }
+                    } else {
+                        // TODO clear only selected planes
                     }
                 }
                 // Return from subroutine
@@ -501,10 +545,10 @@ impl Chirp8 {
                         self.pc = self.pc.wrapping_sub(PROGRAM_COUNTER_STEP) & RAM_MASK;
                         self.steps = self.steps.wrapping_sub(1);
                     } else {
-                        self.display((self.registers[x], self.registers[y]), n);
+                        self.handle_display_instruction((self.registers[x], self.registers[y]), n);
                     }
                 } else {
-                    self.display((self.registers[x], self.registers[y]), n);
+                    self.handle_display_instruction((self.registers[x], self.registers[y]), n);
                 }
             }
             // Skip if key
@@ -527,7 +571,7 @@ impl Chirp8 {
             },
             0xF => {
                 match nn {
-                    // F000 : Load 16-bits adress in index (XO-chip)
+                    // F000 : Load 16-bits adress in index (XO-Chip)
                     0x00 => {
                         if self.mode == Chirp8Mode::XOChip && x == 0 {
                             // The next "instruction" is actually a 16-bits address
@@ -537,6 +581,9 @@ impl Chirp8 {
                             panic!("Unrecognized F instruction {:x}", instruction)
                         }
                     }
+                    // FX01 Plane, select plane(s) X (XO-Chip)
+                    0x01 => self.plane_selection = repeat_bits(x as u8, DISPLAY_PLANES),
+
                     // Timers set VX
                     0x07 => self.registers[x] = self.delay_timer,
                     0x15 => self.delay_timer = self.registers[x],
@@ -690,101 +737,58 @@ impl Chirp8 {
         Option::None
     }
 
-    /// Display `height`-pixel tall sprite pointed by index register at given `x_y_coordinates`.
-    /// If `height` is 0 then a large 16x16 sprite is used.
-    fn display(&mut self, x_y_coordinates: (u8, u8), height: u8) {
-        self.display_changed = true;
-        self.reset_flag();
-        /// Bits in a byte.
-        const BITS: usize = 8;
-
-        let high_resolution = self.mode != Chirp8Mode::CosmacChip8 && self.high_resolution;
-
-        // Hint : In high resolution mode, VF is set to the number of colliding rows, not just 0 or 1.
-
-        if high_resolution && height == 0 {
-            // Handle instruction DXY0 : display 16x16 sprite (height is 16, not 0)
-
-            /// Width and Height of large sprites.
-            const LARGE_SPRITE_SIZE: usize = 16;
-            /// Bytes per line for large sprites.
-            const BYTES_PER_LINE: u16 = 2;
-
-            // The actual dimensions that fall in the screen boundaries.
-            let actual_height = min(
-                LARGE_SPRITE_SIZE,
-                DISPLAY_HEIGHT.saturating_sub(x_y_coordinates.1 as usize),
-            );
-            let actual_width = min(
-                LARGE_SPRITE_SIZE,
-                DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
-            );
-
-            if high_resolution {
-                // Initialize the flag register as the number of sprite lines out-of-screen.
-                self.registers[FLAG_REGISTER_INDEX] = (LARGE_SPRITE_SIZE - actual_height) as u8;
-            }
-
-            for line in 0..actual_height {
-                let mut colliding_line = false;
-                for part in 0..BYTES_PER_LINE {
-                    let sprite_address = ((self
-                        .index
-                        .wrapping_add(BYTES_PER_LINE * (line as u16))
-                        .wrapping_add(part))
-                        & RAM_MASK) as usize;
-                    let sprite = self.ram[sprite_address];
-                    let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
-                    for bit in 0..(min(BITS, actual_width - (part as usize) * BITS)) {
-                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
-                            + (part as usize) * BITS
-                            + bit;
-
-                        // Should the pixel be flipped or not.
-                        let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
-
-                        let pixel = &mut self.display_buffer[row][col];
-                        let pixel_before = *pixel;
-                        *pixel ^= pixel_xor;
-                        // Set flag when turned off
-                        if pixel_before && !(*pixel) {
-                            colliding_line = true;
-                        }
-                    }
-                }
-                if colliding_line {
-                    self.registers[FLAG_REGISTER_INDEX] += 1;
-                }
-            }
+    fn display_sprite(
+        &mut self,
+        x_y_coordinates: (u8, u8),
+        height: u8,
+        colliding_rows_quirk: bool,
+    ) {
+        // Maximum input coordinates
+        let (max_width, max_height, coordinates_scaler) = if self.high_resolution {
+            (DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
         } else {
-            // Handle instruction DXYN : display 8xN sprite
+            (DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 2)
+        };
 
-            // Maximum input coordinates
-            let (max_width, max_height, coordinates_scaler) = if high_resolution {
-                (DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
-            } else {
-                (DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, 2)
-            };
+        let x_y_coordinates = (
+            x_y_coordinates.0 % max_width as u8,
+            x_y_coordinates.1 % max_height as u8,
+        );
 
-            let x_y_coordinates = (
-                x_y_coordinates.0 % max_width as u8,
-                x_y_coordinates.1 % max_height as u8,
-            );
+        // The actual dimensions that fall in the screen boundaries.
+        let actual_height = min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
+        let actual_width = min(
+            u8::BITS as u8,
+            (max_width as u8).saturating_sub(x_y_coordinates.0),
+        );
 
-            // The actual dimensions that fall in the screen boundaries.
-            let actual_height = min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
-            let actual_width = min(
-                BITS as u8,
-                (max_width as u8).saturating_sub(x_y_coordinates.0),
-            );
+        let planes_count = if self.mode != Chirp8Mode::XOChip {
+            1
+        } else {
+            DISPLAY_PLANES
+        };
 
-            if high_resolution {
-                // Initialize the flag register as the number of sprite lines out-of-screen.
-                self.registers[FLAG_REGISTER_INDEX] = height - actual_height;
+        // Although disabled on XO-chip, this quirk is handled as VF being the number of colliding rows on all planes.
+        if colliding_rows_quirk {
+            // Initialize the flag register as the number of sprite lines out-of-screen.
+            self.registers[FLAG_REGISTER_INDEX] = (height - actual_height) * planes_count as u8;
+        }
+
+        // The number of planes drawn so far.
+        let mut drawn_planes = 0;
+        for plane in 0..planes_count {
+            // if 2 planes, masks of plane 0 and 1 are 0b01_01_01_01 and 0b10_10_10_10
+            // if 1 planes, mask of only plane is 0xFF
+            let pixel_bits_mask = repeat_bits(1 << plane, planes_count);
+            if self.plane_selection & pixel_bits_mask == 0 {
+                continue;
             }
-
             for line in 0..(actual_height as usize) {
-                let sprite_address = ((self.index.wrapping_add(line as u16)) & RAM_MASK) as usize;
+                let sprite_address = ((self
+                    .index
+                    .wrapping_add((height as u16) * (drawn_planes as u16))//Plane offset
+                    .wrapping_add(line as u16)) // Line offset
+                    & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
                 let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
                 let mut colliding_line = false;
@@ -792,31 +796,151 @@ impl Chirp8 {
                     let col = (x_y_coordinates.0 as usize + bit) * coordinates_scaler;
 
                     // Should the pixel be flipped or not.
-                    let pixel_xor = ((sprite >> (BITS - 1 - bit)) & 1) != 0;
+                    let pixel_bits_xor = if ((sprite >> ((u8::BITS as usize) - 1 - bit)) & 1) == 0 {
+                        0x00
+                    } else {
+                        pixel_bits_mask
+                    };
 
                     let pixel_before = self.display_buffer[row][col];
                     let mut pixel = pixel_before;
-                    pixel ^= pixel_xor;
+                    pixel ^= pixel_bits_xor;
                     self.display_buffer[row][col] = pixel;
-                    if !high_resolution {
+                    if !self.high_resolution {
                         // Draw 2x2 "pixels" when on low resolution
                         self.display_buffer[row][col + 1] = pixel;
                         self.display_buffer[row + 1][col] = pixel;
                         self.display_buffer[row + 1][col + 1] = pixel;
                     }
                     // Set flag when turned off
-                    if pixel_before && !pixel {
-                        colliding_line = true;
+                    colliding_line |=
+                        pixel_before & pixel_bits_mask != 0 && pixel & pixel_bits_mask == 0;
+                }
+                if colliding_line {
+                    self.registers[FLAG_REGISTER_INDEX] += 1;
+                }
+            }
+            drawn_planes += 1;
+        }
+    }
+
+    /// Display large sprite
+    fn display_large_sprite(&mut self, x_y_coordinates: (u8, u8), colliding_rows_quirk: bool) {
+        /// Width and Height of large sprites.
+        const LARGE_SPRITE_SIZE: usize = 16;
+        /// Bytes per line for large sprites.
+        const BYTES_PER_LINE: u16 = 2;
+
+        // The actual dimensions that fall in the screen boundaries.
+        let actual_height = min(
+            LARGE_SPRITE_SIZE,
+            DISPLAY_HEIGHT.saturating_sub(x_y_coordinates.1 as usize),
+        );
+        let actual_width = min(
+            LARGE_SPRITE_SIZE,
+            DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
+        );
+
+        let planes_count = if self.mode != Chirp8Mode::XOChip {
+            1
+        } else {
+            DISPLAY_PLANES
+        };
+
+        // In SChip mode, VF is set to the number of colliding rows, not just 0 or 1.
+        // Although disabled on XO-chip, this quirk is handled as VF being the number of colliding rows on all planes.
+        if colliding_rows_quirk {
+            // For super-chip, Initialize the flag register as the number of sprite lines out-of-screen.
+            self.registers[FLAG_REGISTER_INDEX] =
+                ((LARGE_SPRITE_SIZE - actual_height) * planes_count) as u8;
+        }
+
+        // The number of planes drawn so far.
+        let mut drawn_planes = 0;
+        for plane in 0..planes_count {
+            // if 2 planes, masks of plane 0 and 1 are 0b01_01_01_01 and 0b10_10_10_10
+            // if 1 planes, mask of only plane is 0xFF
+            let pixel_bits_mask = repeat_bits(1 << plane, planes_count);
+            if self.plane_selection & pixel_bits_mask == 0 {
+                continue;
+            }
+            for line in 0..actual_height {
+                let mut colliding_line = false;
+                for part in 0..BYTES_PER_LINE {
+                    let sprite_address = (self
+                        .index
+                        .wrapping_add(BYTES_PER_LINE * (LARGE_SPRITE_SIZE as u16) * drawn_planes)
+                        .wrapping_add(BYTES_PER_LINE * (line as u16))
+                        .wrapping_add(part)
+                        & RAM_MASK) as usize;
+                    let sprite = self.ram[sprite_address];
+                    let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
+                    for bit in 0..(min(
+                        u8::BITS as usize,
+                        actual_width - (part as usize) * (u8::BITS as usize),
+                    )) {
+                        let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
+                            + (part as usize) * (u8::BITS as usize)
+                            + bit;
+
+                        // Should the pixel be flipped or not
+                        let pixel_bits_xor =
+                            if ((sprite >> ((u8::BITS as usize) - 1 - bit)) & 1) == 0 {
+                                0x00
+                            } else {
+                                pixel_bits_mask
+                            };
+
+                        let pixel = &mut self.display_buffer[row][col];
+                        let pixel_before = *pixel;
+                        *pixel ^= pixel_bits_xor;
+                        // Set flag when turned off
+                        colliding_line |= (pixel_before & pixel_bits_mask) != 0
+                            && (*pixel & pixel_bits_mask) == 0;
                     }
                 }
                 if colliding_line {
-                    if high_resolution {
-                        self.registers[FLAG_REGISTER_INDEX] += 1;
-                    } else {
-                        self.set_flag();
-                    }
+                    self.registers[FLAG_REGISTER_INDEX] += 1;
                 }
             }
+            drawn_planes += 1;
+        }
+    }
+
+    /// Display `height`-pixel tall sprite pointed by index register at given `x_y_coordinates`.
+    /// If `height` is 0 then a large 16x16 sprite is used.
+    /// On XO-Chip, can dray on different planes.
+    fn handle_display_instruction(&mut self, x_y_coordinates: (u8, u8), height: u8) {
+        self.display_changed = true;
+        self.reset_flag();
+
+        // High resolution does not exist on original chip 8.
+        let high_resolution = self.mode != Chirp8Mode::CosmacChip8 && self.high_resolution;
+
+        // On Super-chip, height of 0 indicates a large sprite in hires only.
+        let large_sprite = if self.mode != Chirp8Mode::XOChip {
+            high_resolution && height == 0
+        } else {
+            height == 0
+        };
+
+        // VF counts the number of colliding rows instead of just being set to 0 or 1.
+        let colliding_rows_quirk = matches!(
+            self.mode,
+            Chirp8Mode::SuperChip1_1 | Chirp8Mode::SuperChipModern
+        );
+
+        if large_sprite {
+            // Handle instruction DXY0 : display 16x16 sprite (height is 16, not 0)
+            self.display_large_sprite(x_y_coordinates, colliding_rows_quirk);
+        } else {
+            // Handle instruction DXYN : display 8xN sprite
+            self.display_sprite(x_y_coordinates, height, colliding_rows_quirk);
+        }
+
+        // Saturate flag to 1 if no colliding flag quirk
+        if !colliding_rows_quirk && self.registers[FLAG_REGISTER_INDEX] != 0 {
+            self.registers[FLAG_REGISTER_INDEX] = 1;
         }
     }
 
@@ -829,6 +953,8 @@ impl Chirp8 {
 
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
+        // TODO : XO Chip : only scroll selected planes
+
         // mode == Cosmac Chip 8 is not checked, should not happen.
         let actual_scroll =
             if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
@@ -844,7 +970,7 @@ impl Chirp8 {
         // Bottom of screen is black.
         for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
         {
-            black_row.fill(false);
+            black_row.fill(PIXEL_OFF);
         }
     }
 
@@ -864,7 +990,7 @@ impl Chirp8 {
         self.display_buffer.rotate_right(actual_scroll);
         // Top of screen is black.
         for black_row in &mut self.display_buffer[0..actual_scroll] {
-            black_row.fill(false);
+            black_row.fill(PIXEL_OFF);
         }
     }
 
@@ -882,7 +1008,7 @@ impl Chirp8 {
             } as usize;
         for row in &mut self.display_buffer {
             row.rotate_left(actual_scroll);
-            row[(DISPLAY_WIDTH - actual_scroll)..DISPLAY_WIDTH].fill(false);
+            row[(DISPLAY_WIDTH - actual_scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
         }
     }
 
@@ -900,7 +1026,7 @@ impl Chirp8 {
             } as usize;
         for row in &mut self.display_buffer {
             row.rotate_right(actual_scroll);
-            row[0..actual_scroll].fill(false);
+            row[0..actual_scroll].fill(PIXEL_OFF);
         }
     }
 
@@ -935,6 +1061,18 @@ impl Chirp8 {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_repeat_bits() {
+        assert_eq!(repeat_bits(1, 1), 0xFF);
+        assert_eq!(repeat_bits(0b01, 2), 0b01_01_01_01);
+        assert_eq!(repeat_bits(0b10, 2), 0b10_10_10_10);
+        assert_eq!(repeat_bits(0b11, 2), 0xFF);
+        assert_eq!(repeat_bits(0b1011, 4), 0b1011_1011);
+
+        assert_eq!(repeat_bits(0b0101_1001, 4), 0b1001_1001);
+        assert_eq!(repeat_bits(0b11_10_11_01, 2), 0b01_01_01_01);
+    }
 
     #[test]
     fn opcode_set_vx_nn() {
@@ -998,13 +1136,13 @@ mod test {
         emulator.step();
         emulator.step();
 
-        assert_eq!(emulator.get_display_buffer()[45][67], true);
+        assert_eq!(emulator.get_display_buffer()[45][67], PIXEL_ON);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 0);
 
         emulator.pc -= 2;
         emulator.step();
 
-        assert_eq!(emulator.get_display_buffer()[45][67], false);
+        assert_eq!(emulator.get_display_buffer()[45][67], PIXEL_OFF);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
     }
 
@@ -1018,32 +1156,32 @@ mod test {
 
         let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
-        emulator.display_buffer[37][67] = true;
+        emulator.display_buffer[37][67] = PIXEL_ON;
         emulator.index = PROGRAM_START as u16 + 4;
         emulator.high_resolution = true;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], false);
-        assert_eq!(emulator.display_buffer[32][67], true);
+        assert_eq!(emulator.display_buffer[37][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[32][67], PIXEL_ON);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[32][67], false);
-        assert_eq!(emulator.display_buffer[39][67], true);
+        assert_eq!(emulator.display_buffer[32][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[39][67], PIXEL_ON);
 
         emulator.pc = PROGRAM_START as u16;
         emulator.high_resolution = false;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[39][67], false);
-        assert_eq!(emulator.display_buffer[29][67], true);
+        assert_eq!(emulator.display_buffer[39][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[29][67], PIXEL_ON);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[29][67], false);
-        assert_eq!(emulator.display_buffer[43][67], true);
+        assert_eq!(emulator.display_buffer[29][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[43][67], PIXEL_ON);
     }
 
     #[test]
@@ -1056,32 +1194,32 @@ mod test {
 
         let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
-        emulator.display_buffer[37][67] = true;
+        emulator.display_buffer[37][67] = PIXEL_ON;
         emulator.index = PROGRAM_START as u16 + 4;
         emulator.high_resolution = true;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], false);
-        assert_eq!(emulator.display_buffer[37][71], true);
+        assert_eq!(emulator.display_buffer[37][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[37][71], PIXEL_ON);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][71], false);
-        assert_eq!(emulator.display_buffer[37][67], true);
+        assert_eq!(emulator.display_buffer[37][71], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[37][67], PIXEL_ON);
 
         emulator.pc = PROGRAM_START as u16;
         emulator.high_resolution = false;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], false);
-        assert_eq!(emulator.display_buffer[37][75], true);
+        assert_eq!(emulator.display_buffer[37][67], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[37][75], PIXEL_ON);
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][75], false);
-        assert_eq!(emulator.display_buffer[37][67], true);
+        assert_eq!(emulator.display_buffer[37][75], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[37][67], PIXEL_ON);
     }
 
     #[test]
@@ -1106,9 +1244,9 @@ mod test {
         emulator.registers[0] = 17;
         emulator.registers[1] = 61;
         emulator.step();
-        assert_eq!(emulator.display_buffer[61][17], true);
-        assert_eq!(emulator.display_buffer[62][17], true);
-        assert_eq!(emulator.display_buffer[63][17], true);
+        assert_eq!(emulator.display_buffer[61][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[62][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[63][17], PIXEL_ON);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 2);
 
         // 3 colliding rows (61 to 63 included)
@@ -1117,11 +1255,11 @@ mod test {
         emulator.registers[1] = 59;
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[59][17], true);
-        assert_eq!(emulator.display_buffer[60][17], true);
-        assert_eq!(emulator.display_buffer[61][17], false);
-        assert_eq!(emulator.display_buffer[62][17], false);
-        assert_eq!(emulator.display_buffer[63][17], false);
+        assert_eq!(emulator.display_buffer[59][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[60][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[61][17], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[62][17], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[63][17], PIXEL_OFF);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 3);
     }
 
@@ -1158,20 +1296,20 @@ mod test {
         emulator.registers[0] = 17;
         emulator.registers[1] = 61;
         emulator.step();
-        assert_eq!(emulator.display_buffer[61][17], true);
-        assert_eq!(emulator.display_buffer[62][17], true);
-        assert_eq!(emulator.display_buffer[63][17], true);
+        assert_eq!(emulator.display_buffer[61][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[62][17], PIXEL_ON);
+        assert_eq!(emulator.display_buffer[63][17], PIXEL_ON);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 13);
 
-        // 3 colliding rows (48 to 63 included)
+        // 3 colliding rows (61 to 63 included)
         emulator.pc = PROGRAM_START as u16;
         emulator.registers[0] = 17;
         emulator.registers[1] = 48;
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[61][17], false);
-        assert_eq!(emulator.display_buffer[62][17], false);
-        assert_eq!(emulator.display_buffer[63][17], false);
+        assert_eq!(emulator.display_buffer[61][17], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[62][17], PIXEL_OFF);
+        assert_eq!(emulator.display_buffer[63][17], PIXEL_OFF);
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 3);
     }
 
@@ -1231,6 +1369,132 @@ mod test {
         assert_eq!(emulator.registers[8], 0x54);
         assert_eq!(emulator.registers[9], 0x07);
         assert_eq!(emulator.index, PROGRAM_START as u16 + 4);
+    }
+
+    #[test]
+    fn opcode_display_plane_xo_chip() {
+        #[rustfmt::skip]
+        let rom = [
+            0xF2, 0x01, // Select plane 1
+            0xD0, 0x13, // Display v0 v1 3
+            0xF3, 0x01, // Select both planes
+            0xD0, 0x13, // Display v0 v1 3
+
+            0b10000000, // 3-pixels long vertical sprite
+            0b10000000,
+            0b10000000,
+
+            0b11100000, // 3-pixels long horizontal sprite
+            0b00000000,
+            0b00000000,
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.index = PROGRAM_START as u16 + 8;
+        emulator.high_resolution = true;
+        emulator.plane_selection = 0;
+
+        emulator.step();
+        assert_eq!(emulator.plane_selection, repeat_bits(0b10, 2));
+
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 23;
+
+        emulator.step();
+        // plane 0 untouched
+        // plane 1 is
+        // 100
+        // 100
+        // 100
+        assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[24][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 0);
+
+        emulator.step();
+        assert_eq!(emulator.plane_selection, repeat_bits(0b11, 2));
+
+        emulator.step();
+        // plane 0 is
+        // 100
+        // 100
+        // 100
+        // plane 1 is
+        // 011 -> first pixel is xored with previous step.
+        // 100
+        // 100
+        assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b01, 2));
+        assert_eq!(emulator.display_buffer[23][18], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[23][19], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[24][17], repeat_bits(0b11, 2));
+        assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b11, 2));
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
+    }
+
+    #[test]
+    fn opcode_display_plane_16x16_xo_chip() {
+        #[rustfmt::skip]
+        let rom = [
+            0xF2, 0x01, // Select plane 1
+            0xD0, 0x10, // Display v0 v1 0
+            0xF3, 0x01, // Select both planes
+            0xD0, 0x10, // Display v0 v1 0
+
+            0b1000_0000, 0b0000_0000, // 16x16 sprite with one pixel to the left on first 3px
+            0b1000_0000, 0b0000_0000,
+            0b1000_0000, 0b0000_0000,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            
+            0b11100000, 0b0000_0000,// // 16x16 sprite with one pixel to the top on first 3px
+            0b0000_0000, 0b0000_0000,
+            0b0000_0000, 0b0000_0000,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+
+        emulator.index = PROGRAM_START as u16 + 8;
+        emulator.high_resolution = true;
+        emulator.plane_selection = 0;
+
+        emulator.step();
+        assert_eq!(emulator.plane_selection, repeat_bits(0b10, 2));
+
+        emulator.registers[0] = 17;
+        emulator.registers[1] = 23;
+
+        emulator.step();
+        // plane 0 untouched
+        // plane 1 is
+        // 100
+        // 100
+        // 100
+        assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[24][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b10, 2));
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 0);
+
+        emulator.step();
+        assert_eq!(emulator.plane_selection, repeat_bits(0b11, 2));
+
+        emulator.step();
+        // plane 0 is
+        // 100
+        // 100
+        // 100
+        // plane 1 is
+        // 011 -> first pixel is xored with previous step.
+        // 100
+        // 100
+        assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b01, 2));
+        assert_eq!(emulator.display_buffer[23][18], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[23][19], repeat_bits(0b10, 2));
+        assert_eq!(emulator.display_buffer[24][17], repeat_bits(0b11, 2));
+        assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b11, 2));
+        assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
     }
 
     // TODO : test other opcodes
