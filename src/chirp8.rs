@@ -117,6 +117,7 @@ type Ram = [u8; RAM_SIZE];
 
 /// Repeats the `count` least-significant bits of `value` on following bits.
 /// See [test::test_repeat_bits].
+#[inline]
 const fn repeat_bits(value: u8, count: usize) -> u8 {
     let step = u8::MAX as u8 / ((1 << count) - 1);
     let mask = (1 << count) - 1;
@@ -383,7 +384,7 @@ impl Chirp8 {
                 0xFB => self.scroll_right(4),
                 // Scroll left 4 pixels (Super Chip)
                 0xFC => self.scroll_left(4),
-                _ => panic!("Unrecognized 0 instruction {:x}", instruction),
+                _ => panic!("Unrecognized 0 instruction 0x{:04X}", instruction),
             },
             // Jump
             0x1 => self.pc = nnn,
@@ -438,7 +439,7 @@ impl Chirp8 {
                             self.registers[y..=x].reverse();
                         }
                     }
-                    _ => panic!("Unrecognized (0x5) instruction {:x}", n),
+                    _ => panic!("Unrecognized (0x5) instruction 0x{:04X}", n),
                 }
             }
             // Skip
@@ -499,7 +500,7 @@ impl Chirp8 {
                 }
                 // Shift VX right
                 0x6 => {
-                    if self.mode == Chirp8Mode::CosmacChip8 {
+                    if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
                         self.registers[x] = self.registers[y];
                     }
                     let flag = self.registers[x] & 0x1;
@@ -518,21 +519,24 @@ impl Chirp8 {
                 }
                 // Shift VX left
                 0xE => {
-                    if self.mode == Chirp8Mode::CosmacChip8 {
+                    if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
                         self.registers[x] = self.registers[y];
                     }
                     let flag = (self.registers[x] >> 7) & 0x1;
                     self.registers[x] <<= 1;
                     self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
-                _ => panic!("Unrecognized logic (0x8) instruction {:x}", n),
+                _ => panic!("Unrecognized logic (0x8) instruction 0x{:04X}", instruction),
             },
             // Set index
             0xA => self.index = nnn,
             // Jump with offset
             0xB => {
                 self.pc = (nnn
-                    + self.registers[if self.mode == Chirp8Mode::CosmacChip8 {
+                    + self.registers[if matches!(
+                        self.mode,
+                        Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip
+                    ) {
                         0
                     } else {
                         x
@@ -577,7 +581,7 @@ impl Chirp8 {
                         self.skip_next_instruction();
                     }
                 }
-                _ => panic!("Unrecognized E instruction {:x}", instruction),
+                _ => panic!("Unrecognized E instruction 0x{:04X}", instruction),
             },
             0xF => {
                 match nn {
@@ -588,7 +592,7 @@ impl Chirp8 {
                             self.index = self.next_instruction();
                             self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP);
                         } else {
-                            panic!("Unrecognized F instruction {:x}", instruction)
+                            panic!("Unrecognized F instruction 0x{:04X}", instruction)
                         }
                     }
                     // FX01 Plane, select plane(s) X (XO-Chip)
@@ -691,11 +695,11 @@ impl Chirp8 {
                         };
                         self.registers[0..count].copy_from_slice(&self.rpl_registers[0..count]);
                     }
-                    _ => panic!("Unrecognized E instruction {:x}", instruction),
+                    _ => panic!("Unrecognized E instruction 0x{:04X}", instruction),
                 }
             }
 
-            _ => panic!("Unrecognized instruction {:x}", instruction),
+            _ => panic!("Unrecognized instruction 0x{:04X}", instruction),
         }
         // Handle timers
         self.step_timers();
