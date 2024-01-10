@@ -99,6 +99,8 @@ pub const PIXEL_ON: u8 = 0xFF;
 pub const PIXEL_STEP: u8 = repeat_bits(1, DISPLAY_PLANES);
 /// Number of display planes used by XO-Chip.
 const DISPLAY_PLANES: usize = 2;
+/// Mask of relevant bits in plane selection
+const PLANES_MASK: u8 = (1 << DISPLAY_PLANES as u8) - 1;
 
 // Create type aliases depending on if the heap is available or not.
 // cfg_if is not used here in order to provide type hints in IDEs.
@@ -348,21 +350,29 @@ impl Chirp8 {
                 // Clear screen
                 0xE0 => {
                     if self.mode != Chirp8Mode::XOChip {
-                        for row in &mut self.display_buffer {
-                            row.fill(PIXEL_OFF)
-                        }
+                        self.clear_display();
                     } else {
-                        // TODO clear only selected planes
+                        self.clear_planes();
                     }
                 }
                 // Return from subroutine
                 0xEE => self.pc = self.stack.pop().ok().unwrap(),
-                // Exit from interpreter (S-Chip)
+                // Exit from interpreter (Super-Chip)
                 0xFD => self.reset(),
-                // Disable High-res (S-Chip)
-                0xFE => self.high_resolution = false,
-                // Enable High-res (S-chip)
-                0xFF => self.high_resolution = true,
+                // Disable High-res (Super-Chip and above)
+                0xFE => {
+                    self.high_resolution = false;
+                    if self.mode == Chirp8Mode::XOChip {
+                        self.clear_display();
+                    }
+                }
+                // Enable High-res (Super-chip and above)
+                0xFF => {
+                    self.high_resolution = true;
+                    if self.mode == Chirp8Mode::XOChip {
+                        self.clear_display();
+                    }
+                }
                 // Scroll up N pixels (XO-Chip)
                 0xD0..=0xDF => self.scroll_up(n),
                 // Scroll up N pixels (Unofficial Super Chip)
@@ -737,6 +747,31 @@ impl Chirp8 {
         Option::None
     }
 
+    /// Clears the screen.
+    fn clear_display(&mut self) {
+        for row in &mut self.display_buffer {
+            row.fill(PIXEL_OFF);
+        }
+    }
+
+    /// Clears the selected screen planes.
+    fn clear_planes(&mut self) {
+        if self.mode != Chirp8Mode::XOChip || self.plane_selection & PLANES_MASK == PLANES_MASK {
+            self.clear_display();
+        } else {
+            for plane in 0..DISPLAY_PLANES {
+                let plane_mask = repeat_bits(1 << plane, DISPLAY_PLANES);
+                if plane_mask & self.plane_selection != 0 {
+                    for row in &mut self.display_buffer {
+                        for pixel in row {
+                            *pixel &= !plane_mask;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn display_sprite(
         &mut self,
         x_y_coordinates: (u8, u8),
@@ -784,10 +819,10 @@ impl Chirp8 {
                 continue;
             }
             for line in 0..(actual_height as usize) {
-                let sprite_address = ((self
+                let sprite_address = (self
                     .index
                     .wrapping_add((height as u16) * (drawn_planes as u16))//Plane offset
-                    .wrapping_add(line as u16)) // Line offset
+                    .wrapping_add(line as u16) // Line offset
                     & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
                 let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
