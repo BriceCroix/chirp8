@@ -77,10 +77,10 @@ impl App {
             for i in 0..DISPLAY_HEIGHT {
                 for j in 0..DISPLAY_WIDTH {
                     if emulator_screen[i][j] != 0{
-                        let color = emulator_screen[i][j] as f32;
+                        let color = emulator_screen[i][j] as f32 / 255f32;
                         let (i_px, j_px) = Self::get_cell_pixel_coordinates(i, j);
                         rectangle(
-                            [color, color, color, 255f32],
+                            [color, color, color, 1.0],
                             rectangle::square(0.0, 0.0, PIXELS_PER_CELL as f64),
                             c.transform.trans(j_px as f64, i_px as f64),
                             g,
