@@ -794,24 +794,12 @@ impl Chirp8 {
             x_y_coordinates.1 % max_height as u8,
         );
 
-        // The actual dimensions that fall in the screen boundaries.
-        let actual_height = min(height, (max_height as u8).saturating_sub(x_y_coordinates.1));
-        let actual_width = min(
-            u8::BITS as u8,
-            (max_width as u8).saturating_sub(x_y_coordinates.0),
-        );
-
-        let planes_count = if self.mode != Chirp8Mode::XOChip {
-            1
+        // Number of color planes, do sprites wrap around screen edges.
+        let (planes_count, wrapping) = if self.mode != Chirp8Mode::XOChip {
+            (1, false)
         } else {
-            DISPLAY_PLANES
+            (DISPLAY_PLANES, true)
         };
-
-        // Although disabled on XO-chip, this quirk is handled as VF being the number of colliding rows on all planes.
-        if colliding_rows_quirk {
-            // Initialize the flag register as the number of sprite lines out-of-screen.
-            self.registers[FLAG_REGISTER_INDEX] = (height - actual_height) * planes_count as u8;
-        }
 
         // The number of planes drawn so far.
         let mut drawn_planes = 0;
@@ -822,7 +810,7 @@ impl Chirp8 {
             if self.plane_selection & pixel_bits_mask == 0 {
                 continue;
             }
-            for line in 0..(actual_height as usize) {
+            for line in 0..(height as usize) {
                 let sprite_address = (self
                     .index
                     .wrapping_add((height as u16) * (drawn_planes as u16))//Plane offset
@@ -830,9 +818,26 @@ impl Chirp8 {
                     & RAM_MASK) as usize;
                 let sprite = self.ram[sprite_address];
                 let row = ((x_y_coordinates.1 as usize) + line) * coordinates_scaler;
+
+                // Handle line clipping / wrapping
+                if row >= DISPLAY_HEIGHT && !wrapping {
+                    if colliding_rows_quirk {
+                        self.registers[FLAG_REGISTER_INDEX] += 1;
+                        continue;
+                    }
+                    break;
+                }
+                let row = row % DISPLAY_HEIGHT;
+
                 let mut colliding_line = false;
-                for bit in 0..(actual_width as usize) {
+                for bit in 0..(u8::BITS as usize) {
                     let col = (x_y_coordinates.0 as usize + bit) * coordinates_scaler;
+
+                    // Handle width clipping / wrapping
+                    if col >= DISPLAY_WIDTH && !wrapping {
+                        break;
+                    }
+                    let col = col % DISPLAY_WIDTH;
 
                     // Should the pixel be flipped or not.
                     let pixel_bits_xor = if ((sprite >> ((u8::BITS as usize) - 1 - bit)) & 1) == 0 {
@@ -870,29 +875,15 @@ impl Chirp8 {
         /// Bytes per line for large sprites.
         const BYTES_PER_LINE: u16 = 2;
 
-        // The actual dimensions that fall in the screen boundaries.
-        let actual_height = min(
-            LARGE_SPRITE_SIZE,
-            DISPLAY_HEIGHT.saturating_sub(x_y_coordinates.1 as usize),
-        );
-        let actual_width = min(
-            LARGE_SPRITE_SIZE,
-            DISPLAY_WIDTH.saturating_sub(x_y_coordinates.0 as usize),
-        );
-
-        let planes_count = if self.mode != Chirp8Mode::XOChip {
-            1
+        // Number of color planes, do sprites wrap around screen edges.
+        let (planes_count, wrapping) = if self.mode != Chirp8Mode::XOChip {
+            (1, false)
         } else {
-            DISPLAY_PLANES
+            (DISPLAY_PLANES, true)
         };
 
         // In SChip mode, VF is set to the number of colliding rows, not just 0 or 1.
         // Although disabled on XO-chip, this quirk is handled as VF being the number of colliding rows on all planes.
-        if colliding_rows_quirk {
-            // For super-chip, Initialize the flag register as the number of sprite lines out-of-screen.
-            self.registers[FLAG_REGISTER_INDEX] =
-                ((LARGE_SPRITE_SIZE - actual_height) * planes_count) as u8;
-        }
 
         // The number of planes drawn so far.
         let mut drawn_planes = 0;
@@ -903,24 +894,42 @@ impl Chirp8 {
             if self.plane_selection & pixel_bits_mask == 0 {
                 continue;
             }
-            for line in 0..actual_height {
+            for line in 0..LARGE_SPRITE_SIZE {
+                let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
+
+                // Handle line clipping / wrapping
+                if row >= DISPLAY_HEIGHT && !wrapping {
+                    if colliding_rows_quirk {
+                        self.registers[FLAG_REGISTER_INDEX] += 1;
+                        continue;
+                    }
+                    break;
+                }
+                let row = row % DISPLAY_HEIGHT;
+
                 let mut colliding_line = false;
-                for part in 0..BYTES_PER_LINE {
+                for half in 0..BYTES_PER_LINE {
                     let sprite_address = (self
                         .index
                         .wrapping_add(BYTES_PER_LINE * (LARGE_SPRITE_SIZE as u16) * drawn_planes)
                         .wrapping_add(BYTES_PER_LINE * (line as u16))
-                        .wrapping_add(part)
+                        .wrapping_add(half)
                         & RAM_MASK) as usize;
                     let sprite = self.ram[sprite_address];
-                    let row = (x_y_coordinates.1 as usize % DISPLAY_HEIGHT) + line;
+
                     for bit in 0..(min(
                         u8::BITS as usize,
-                        actual_width - (part as usize) * (u8::BITS as usize),
+                        LARGE_SPRITE_SIZE - (half as usize) * (u8::BITS as usize),
                     )) {
                         let col = x_y_coordinates.0 as usize % DISPLAY_WIDTH
-                            + (part as usize) * (u8::BITS as usize)
+                            + (half as usize) * (u8::BITS as usize)
                             + bit;
+
+                        // Handle width clipping / wrapping
+                        if col >= DISPLAY_WIDTH && !wrapping {
+                            break;
+                        }
+                        let col = col % DISPLAY_WIDTH;
 
                         // Should the pixel be flipped or not
                         let pixel_bits_xor =
@@ -967,7 +976,7 @@ impl Chirp8 {
         let colliding_rows_quirk = matches!(
             self.mode,
             Chirp8Mode::SuperChip1_1 | Chirp8Mode::SuperChipModern
-        );
+        ) && self.high_resolution;
 
         if large_sprite {
             // Handle instruction DXY0 : display 16x16 sprite (height is 16, not 0)
