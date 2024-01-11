@@ -30,7 +30,8 @@ const FONT_SPRITES_ADDRESS: usize = 0;
 const FONT_SPRITES_STEP: usize = 5;
 /// The number of font sprites (1 for each character from '0' to 'F').
 const FONT_SPRITES_COUNT: usize = 16;
-/// The font sprites, from '0' to 'F'.
+/// The font sprites, from '0' to 'F'. Same as CosmacVIP font.
+#[rustfmt::skip]
 const FONT_SPRITES: [u8; FONT_SPRITES_STEP * FONT_SPRITES_COUNT] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -54,6 +55,9 @@ const FONT_SPRITES_HIGH_ADDRESS: usize = FONT_SPRITES_ADDRESS + FONT_SPRITES.len
 /// The address step between two consecutive high-resolution font sprites.
 const FONT_SPRITES_HIGH_STEP: usize = 10;
 /// The high-resolution font sprites, from '0' to 'F' (only 0-9 are present in original interpreter).
+/// The font is taken from super chip from 0 to 9,
+/// and from [C-Octo](https://github.com/JohnEarnest/c-octo/blob/main/src/octo_emulator.h) from A to F.
+#[rustfmt::skip]
 const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, // 0
     0x18, 0x38, 0x58, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, // 1
@@ -65,24 +69,18 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, // 7
     0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, // 8
     0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C, // 9
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // A (absent) // TODO for XO-Chip
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // B (absent) // TODO for XO-Chip
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // C (absent) // TODO for XO-Chip
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // D (absent) // TODO for XO-Chip
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // E (absent) // TODO for XO-Chip
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, // F (absent) // TODO for XO-Chip
+    0x7E, 0xFF, 0xC3, 0xC3, 0xC3, 0xFF, 0xFF, 0xC3, 0xC3, 0xC3, // A 
+    0xFC, 0xFC, 0xC3, 0xC3, 0xFC, 0xFC, 0xC3, 0xC3, 0xFC, 0xFC, // B
+    0x3C, 0xFF, 0xC3, 0xC0, 0xC0, 0xC0, 0xC0, 0xC3, 0xFF, 0x3C, // C
+    0xFC, 0xFE, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xFE, 0xFC, // D
+    0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, // E
+    0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, 0xC0, 0xC0, 0xC0, 0xC0  // F
 ];
 /// Refresh rate, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
 pub const REFRESH_RATE_HZ: usize = 60;
-/// Number of RPL flags registers on the HP48.
-const RPL_REGISTERS_COUNT: usize = 8;
+/// Number of RPL flags registers. 8 on the HP48, 16 on XO-Chip.
+const RPL_REGISTERS_COUNT: usize = 16;
 /// Number of memory bytes read by CPU at each cycle.
 const PROGRAM_COUNTER_STEP: u16 = 2;
 
@@ -101,6 +99,8 @@ pub const PIXEL_STEP: u8 = repeat_bits(1, DISPLAY_PLANES);
 const DISPLAY_PLANES: usize = 2;
 /// Mask of relevant bits in plane selection
 const PLANES_MASK: u8 = (1 << DISPLAY_PLANES as u8) - 1;
+/// Number of bytes for the audio pattern buffer on XO-Chip.
+const AUDIO_BUFFER_SIZE: usize = 16;
 
 // Create type aliases depending on if the heap is available or not.
 // cfg_if is not used here in order to provide type hints in IDEs.
@@ -165,6 +165,10 @@ pub struct Chirp8 {
     delay_timer: u8,
     /// Persistent RPL flags registers.
     rpl_registers: [u8; RPL_REGISTERS_COUNT],
+    /// The audio buffer of XO-Chip.
+    audio_buffer: [u8; AUDIO_BUFFER_SIZE],
+    /// The pitch buffer, each bit of the audio buffer is played at a rate of 4000*2^((pitch-64)/48).
+    pitch: u8,
 
     /// Each key is set to true whe pressed and false when released.
     keys: [bool; KEYS_COUNT as usize],
@@ -238,6 +242,14 @@ impl Chirp8 {
             repeat_bits(1, 1)
         };
 
+        // Fill audio buffer with 128-samples long square wave. (8x16)
+        // Played at a rate of 4000 Hz, this yields a frequency of 31.25 Hz
+        let mut audio_buffer = [0; AUDIO_BUFFER_SIZE];
+        audio_buffer
+            .split_at_mut(AUDIO_BUFFER_SIZE / 2)
+            .1
+            .fill(0xFF);
+
         // Create emulator
         Self {
             ram: ram,
@@ -249,6 +261,8 @@ impl Chirp8 {
             sound_timer: 0,
             delay_timer: 0,
             rpl_registers: [0; RPL_REGISTERS_COUNT],
+            audio_buffer: audio_buffer,
+            pitch: 0,
             keys: [false; KEYS_COUNT as usize],
             keys_previous: [false; KEYS_COUNT as usize],
             high_resolution: false,
@@ -707,6 +721,7 @@ impl Chirp8 {
         self.keys_previous.copy_from_slice(&self.keys);
     }
 
+    /// Tick timers by one machine cycle, and update them accordingly.
     fn step_timers(&mut self) {
         self.steps_since_frame += 1;
         if self.steps_since_frame >= self.steps_per_frame {
@@ -716,6 +731,7 @@ impl Chirp8 {
         }
     }
 
+    /// Increments program counter so that the next instruction is skipped.
     fn skip_next_instruction(&mut self) {
         const LOAD_LARGE_INDEX_OPCODE: u16 = 0xF000;
         let offset = if self.mode == Chirp8Mode::XOChip
@@ -776,6 +792,7 @@ impl Chirp8 {
         }
     }
 
+    /// Displays sprite on screen.
     fn display_sprite(
         &mut self,
         x_y_coordinates: (u8, u8),
@@ -868,7 +885,7 @@ impl Chirp8 {
         }
     }
 
-    /// Display large sprite
+    /// Display large 16 by 16 sprite.
     fn display_large_sprite(&mut self, x_y_coordinates: (u8, u8), colliding_rows_quirk: bool) {
         /// Width and Height of large sprites.
         const LARGE_SPRITE_SIZE: usize = 16;
@@ -1001,8 +1018,6 @@ impl Chirp8 {
 
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
-        // TODO : XO Chip : only scroll selected planes
-
         // mode == Cosmac Chip 8 is not checked, should not happen.
         let actual_scroll =
             if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
@@ -1078,14 +1093,27 @@ impl Chirp8 {
         }
     }
 
-    /// Indicates whether the sound buzzer is currently on.
-    pub fn is_buzzer_on(&self) -> bool {
+    /// Indicates whether the sound buzzer is currently on or not.
+    /// On XO-Chip, indicates that the audio buffer is being played.
+    pub fn is_sounding(&self) -> bool {
         self.sound_timer > 0
     }
 
+    /// Indicates whether the emulator has complex sound waves, given by [Chirp8::get_audio_buffer] (true),
+    /// or only simple buzzing sounds (false).
+    pub fn has_sound_wave(&self) -> bool {
+        self.mode == Chirp8Mode::XOChip
+    }
+
     /// Load a ROM into memory. The ROM must be smaller than `PROGRAM_SIZE`.
-    pub fn load_rom(&mut self, rom: &[u8]) {
-        self.ram[PROGRAM_START..(PROGRAM_START + rom.len())].copy_from_slice(rom);
+    /// Returns true if the ROM has been loaded to RAM, false otherwise.
+    pub fn load_rom(&mut self, rom: &[u8]) -> bool {
+        if rom.len() < PROGRAM_SIZE {
+            self.ram[PROGRAM_START..(PROGRAM_START + rom.len())].copy_from_slice(rom);
+            true
+        } else {
+            false
+        }
     }
 
     /// Load given data into persistent RPL registers.
@@ -1100,9 +1128,31 @@ impl Chirp8 {
 
     /// Returns a reference to the internal display buffer.
     /// Notice that when running on Cosmac mode, each "pixel" is displayed as a 2 by 2 square,
-    /// in order to match the resolution of the Super-Chip mode.
+    /// in order to match the resolution of the Super-Chip / XO-Chip.
     pub fn get_display_buffer(&self) -> &DisplayBuffer {
         &self.display_buffer
+    }
+
+    /// Access the 128 1-bit samples in the audio buffer. 
+    pub fn get_audio_buffer(&self) -> &[u8; AUDIO_BUFFER_SIZE] {
+        &self.audio_buffer
+    }
+
+    /// Returns the log2 of the audio bit rate in Hertz.
+    /// Each bit in the audio buffer (128 bits) must be played at this rate.
+    /// This method does not do the exponentiation in order not to use the standard library.
+    /// Usage :
+    /// ```
+    /// let chirp = chirp8::Chirp8::new(chirp8::Chirp8Mode::XOChip);
+    /// // ...
+    /// let frequency = 2f32.powf(chirp.get_audio_bit_rate_log2_hz());
+    /// ```
+    pub fn get_audio_bit_rate_log2_hz(&self) -> f32 {
+        // 4000 * 2^((pitch-64)/48)
+        // = 2 ^ ( log2(4000) + ((pitch-64) / 48) )
+        const LOG2_4000: f32 = 11.96578428466208704361095828846817052759449417907374183616426;
+
+        LOG2_4000 + ((self.pitch as f32 - 64f32) / 48f32)
     }
 }
 
@@ -1544,6 +1594,5 @@ mod test {
         assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b11, 2));
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
     }
-
     // TODO : test other opcodes
 }
