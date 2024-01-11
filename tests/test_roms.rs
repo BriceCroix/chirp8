@@ -14,10 +14,19 @@ fn print_display(buffer: &chirp8::DisplayBuffer) {
     println!();
 }
 
-fn assert_screen_eq(buffer: &chirp8::DisplayBuffer, expected: &bmp::Image) {
+/// Asserts that every pixel in the given `buffer` is the same as given `expected` image.
+/// Compares the pixel value if `compare_value` is true, otherwise only checks if pixels are turned on or not.
+fn assert_screen_eq(buffer: &chirp8::DisplayBuffer, expected: &bmp::Image, compare_value: bool) {
     for i in 0..DISPLAY_HEIGHT {
         for j in 0..DISPLAY_WIDTH {
-            assert_eq!(buffer[i][j], expected.get_pixel(j as u32, i as u32).r);
+            if compare_value {
+                assert_eq!(buffer[i][j], expected.get_pixel(j as u32, i as u32).r);
+            } else {
+                assert_eq!(
+                    buffer[i][j] == 0,
+                    expected.get_pixel(j as u32, i as u32).r == 0
+                );
+            }
         }
     }
 }
@@ -48,7 +57,7 @@ fn ibm_logo() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/ibm_logo.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -65,7 +74,7 @@ fn chip8_logo() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/chip8_logo.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -83,7 +92,7 @@ fn corax() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/corax+.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -101,7 +110,7 @@ fn flags() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/flags.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -125,7 +134,7 @@ fn quirks_chip_8() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_chip8.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -152,7 +161,7 @@ fn quirks_super_chip_1_1() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_super_chip_legacy.bmp").unwrap();
 
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -179,7 +188,31 @@ fn quirks_super_chip_modern() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/quirks_super_chip_modern.bmp").unwrap();
 
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
+}
+
+#[test]
+fn quirks_xo_chip() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/5-quirks.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::XOChip);
+
+    emulator.load_rom(rom);
+    // Force XO chip test mode
+    let key = 3;
+    acknowledge_keypress(&mut emulator, key);
+
+    for _ in 0..500 {
+        emulator.run_frame();
+    }
+    print_display(emulator.get_display_buffer());
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/quirks_xo_chip.bmp").unwrap();
+
+    assert_screen_eq(display, &expected, false);
 }
 
 #[test]
@@ -203,7 +236,7 @@ fn keypad_fx0a() {
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/keypad_FX0A.bmp").unwrap();
 
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
@@ -231,11 +264,11 @@ fn scrolling_hires_1_1() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
-fn scrolling_lores_1_1() {
+fn scrolling_lores_super_chip_1_1() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
 
@@ -261,11 +294,11 @@ fn scrolling_lores_1_1() {
     let expected = bmp::open("tests/scrolling_lores.bmp").unwrap();
     print_display(display);
 
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
-fn scrolling_hires_modern() {
+fn scrolling_hires_super_chip_modern() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
 
@@ -289,11 +322,11 @@ fn scrolling_hires_modern() {
 
     let display = emulator.get_display_buffer();
     let expected = bmp::open("tests/scrolling_hires.bmp").unwrap();
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
 }
 
 #[test]
-fn scrolling_lores_modern() {
+fn scrolling_lores_super_chip_modern() {
     // Statically load test rom.
     let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
 
@@ -319,5 +352,58 @@ fn scrolling_lores_modern() {
     let expected = bmp::open("tests/scrolling_lores.bmp").unwrap();
     print_display(display);
 
-    assert_screen_eq(display, &expected);
+    assert_screen_eq(display, &expected, true);
+}
+
+#[test]
+fn scrolling_hires_xo_chip() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::XOChip);
+    emulator.load_rom(rom);
+
+    // XO chip test mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+    // hires mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+
+    for _ in 0..500 {
+        emulator.run_frame();
+    }
+    print_display(emulator.get_display_buffer());
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/scrolling_xo_chip_hires.bmp").unwrap();
+    assert_screen_eq(display, &expected, false);
+}
+
+#[test]
+fn scrolling_lores_xo_chip() {
+    // Statically load test rom.
+    let rom = include_bytes!("../submodules/chip8-test-suite/bin/8-scrolling.ch8");
+
+    // Create and run emulator
+    let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::XOChip);
+    emulator.load_rom(rom);
+
+    // XO chip test mode
+    let key = 2;
+    acknowledge_keypress(&mut emulator, key);
+    // lores mode
+    let key = 1;
+    acknowledge_keypress(&mut emulator, key);
+
+    for _ in 0..500 {
+        emulator.run_frame();
+    }
+
+    let display = emulator.get_display_buffer();
+    let expected = bmp::open("tests/scrolling_xo_chip_lores.bmp").unwrap();
+    print_display(display);
+
+    assert_screen_eq(display, &expected, false);
 }
