@@ -63,7 +63,7 @@ impl App {
         self.window.draw_2d(event, |c, g, _device| {
             // Draw red background if sound.
             const SOUND_COLOR: Color = [1.0, 0.0, 0.0, 0.5];
-            let background = if self.emulator.is_buzzer_on() {
+            let background = if self.emulator.is_sounding() {
                 SOUND_COLOR
             } else {
                 COLOR_OFF
