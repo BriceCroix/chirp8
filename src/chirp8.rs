@@ -7,10 +7,10 @@ use super::stack::Stack;
 /// Number of elements storable in the emulator's stack (originally 12, 16 from super chip and above).
 const STACK_SIZE: usize = 16;
 /// The whole emulator's memory is RAM : 12-bits addresses.
-#[cfg(not(feature = "xochip"))]
+#[cfg(not(feature = "mem_extend"))]
 const RAM_SIZE: usize = 0x1000;
 /// The whole emulator's memory is RAM : 16-bits addresses.
-#[cfg(feature = "xochip")]
+#[cfg(feature = "mem_extend")]
 const RAM_SIZE: usize = 0x10000;
 /// A mask to use on addresses.
 const RAM_MASK: u16 = (RAM_SIZE - 1) as u16;
