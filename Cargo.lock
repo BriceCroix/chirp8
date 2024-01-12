@@ -179,6 +179,7 @@ dependencies = [
 name = "chirp8"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.4.1",
  "bmp",
  "cfg-if",
  "getopts",

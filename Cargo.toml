@@ -12,6 +12,7 @@ mem_extend = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bitflags = "2.4.1"
 cfg-if = "1.0.0"
 rand = {version = "0.8.5", features = ["small_rng"], default-features = false}
 

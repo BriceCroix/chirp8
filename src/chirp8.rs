@@ -2,6 +2,8 @@ use core::cmp::min;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 
+use crate::QuirkFlags;
+
 use super::stack::Stack;
 
 /// Number of elements storable in the emulator's stack (originally 12, 16 from super chip and above).
@@ -55,8 +57,9 @@ const FONT_SPRITES_HIGH_ADDRESS: usize = FONT_SPRITES_ADDRESS + FONT_SPRITES.len
 /// The address step between two consecutive high-resolution font sprites.
 const FONT_SPRITES_HIGH_STEP: usize = 10;
 /// The high-resolution font sprites, from '0' to 'F' (only 0-9 are present in original interpreter).
-/// The font is taken from super chip from 0 to 9,
-/// and from [C-Octo](https://github.com/JohnEarnest/c-octo/blob/main/src/octo_emulator.h) from A to F.
+/// The 0 to 9 font is taken from super chip, and A to F come from
+/// [C-Octo](https://github.com/JohnEarnest/c-octo/blob/main/src/octo_emulator.h).
+/// These font characters are 8x10 (two classic sprites stacked vertically).
 #[rustfmt::skip]
 const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, // 0
@@ -126,7 +129,7 @@ const fn repeat_bits(value: u8, count: usize) -> u8 {
 
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
     CosmacChip8,
@@ -186,6 +189,8 @@ pub struct Chirp8 {
 
     /// The current running mode of the emulator.
     mode: Chirp8Mode,
+    /// The enabled quirks of the emulator.
+    quirks: QuirkFlags,
     /// Number of cpu steps taken since last timer step.
     steps_since_frame: usize,
     /// Meta flag to indicate that the display changed.
@@ -208,6 +213,12 @@ impl Default for Chirp8 {
 impl Chirp8 {
     /// Creates a new emulator, which will behave according to given `mode`.
     pub fn new(mode: Chirp8Mode) -> Self {
+        Chirp8::with_custom_quirks(mode, QuirkFlags::from_mode(mode))
+    }
+
+    /// Creates a new emulator, which will behave according to given `mode` and with custom quirks
+    /// behaviour.
+    pub fn with_custom_quirks(mode: Chirp8Mode, quirks: QuirkFlags) -> Self {
         // Create RAM and display buffer
         cfg_if::cfg_if! {
             if #[cfg(feature = "alloc")]{
@@ -250,6 +261,13 @@ impl Chirp8 {
             .1
             .fill(0xFF);
 
+        let mut randomizer = SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE);
+
+        if quirks.contains(QuirkFlags::RAM_RANDOM) {
+            ram[PROGRAM_START..(PROGRAM_START + PROGRAM_SIZE)]
+                .fill_with(|| randomizer.next_u32() as u8);
+        }
+
         // Create emulator
         Self {
             ram: ram,
@@ -268,9 +286,10 @@ impl Chirp8 {
             high_resolution: false,
             plane_selection: plane_selection,
             mode: mode,
+            quirks: quirks,
             steps_since_frame: 0,
             display_changed: true,
-            randomizer: SmallRng::seed_from_u64(0xDEADCAFEDEADCAFE),
+            randomizer: randomizer,
             steps: 0,
             steps_per_frame: steps_per_frame,
         }
@@ -377,14 +396,14 @@ impl Chirp8 {
                 // Disable High-res (Super-Chip and above)
                 0xFE => {
                     self.high_resolution = false;
-                    if self.mode == Chirp8Mode::XOChip {
+                    if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
                         self.clear_display();
                     }
                 }
                 // Enable High-res (Super-chip and above)
                 0xFF => {
                     self.high_resolution = true;
-                    if self.mode == Chirp8Mode::XOChip {
+                    if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
                         self.clear_display();
                     }
                 }
@@ -474,21 +493,21 @@ impl Chirp8 {
                 // OR
                 0x1 => {
                     self.registers[x] |= self.registers[y];
-                    if self.mode == Chirp8Mode::CosmacChip8 {
+                    if self.quirks.contains(QuirkFlags::FLAG_RESET) {
                         self.reset_flag();
                     }
                 }
                 // AND
                 0x2 => {
                     self.registers[x] &= self.registers[y];
-                    if self.mode == Chirp8Mode::CosmacChip8 {
+                    if self.quirks.contains(QuirkFlags::FLAG_RESET) {
                         self.reset_flag();
                     }
                 }
                 // XOR
                 0x3 => {
                     self.registers[x] ^= self.registers[y];
-                    if self.mode == Chirp8Mode::CosmacChip8 {
+                    if self.quirks.contains(QuirkFlags::FLAG_RESET) {
                         self.reset_flag();
                     }
                 }
@@ -514,7 +533,7 @@ impl Chirp8 {
                 }
                 // Shift VX right
                 0x6 => {
-                    if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                    if !self.quirks.contains(QuirkFlags::SHIFT_X_ONLY) {
                         self.registers[x] = self.registers[y];
                     }
                     let flag = self.registers[x] & 0x1;
@@ -533,7 +552,7 @@ impl Chirp8 {
                 }
                 // Shift VX left
                 0xE => {
-                    if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                    if !self.quirks.contains(QuirkFlags::SHIFT_X_ONLY) {
                         self.registers[x] = self.registers[y];
                     }
                     let flag = (self.registers[x] >> 7) & 0x1;
@@ -547,13 +566,10 @@ impl Chirp8 {
             // Jump with offset
             0xB => {
                 self.pc = (nnn
-                    + self.registers[if matches!(
-                        self.mode,
-                        Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip
-                    ) {
-                        0
-                    } else {
+                    + self.registers[if self.quirks.contains(QuirkFlags::JUMP_XNN) {
                         x
+                    } else {
+                        0
                     }] as u16)
                     & RAM_MASK;
             }
@@ -565,8 +581,11 @@ impl Chirp8 {
                 // so the step is not taken and the program counter is not incremented.
                 // This quirk is only enabled on original Chip 8 and low-resolution (low-speed) super-chip.
                 // See : https://github.com/Timendus/chip8-test-suite/blob/main/legacy-superchip.md
-                let wait_enabled = self.mode == Chirp8Mode::CosmacChip8
-                    || (self.mode == Chirp8Mode::SuperChip1_1 && !self.high_resolution);
+                let wait_enabled = if self.high_resolution {
+                    self.quirks.contains(QuirkFlags::DISPLAY_WAIT_HIRES)
+                } else {
+                    self.quirks.contains(QuirkFlags::DISPLAY_WAIT_LORES)
+                };
 
                 if wait_enabled {
                     if self.steps_since_frame != 0 {
@@ -618,20 +637,20 @@ impl Chirp8 {
                     0x18 => self.sound_timer = self.registers[x],
                     // Add to index
                     0x1E => {
-                        if self.mode != Chirp8Mode::XOChip {
-                            self.index = self.index + self.registers[x] as u16;
-                            // Check 12-bits overflow
-                            if self.index & !RAM_MASK != 0 {
-                                self.set_flag();
-                                self.index &= RAM_MASK;
-                            }
-                        } else {
+                        if cfg!(feature = "mem_extend") {
                             // Check 16-bits overflow
                             if let Some(result) = self.index.checked_add(self.registers[x] as u16) {
                                 self.index = result;
                             } else {
                                 self.index = self.index.wrapping_add(self.registers[x] as u16);
                                 self.set_flag();
+                            }
+                        } else {
+                            self.index = self.index + self.registers[x] as u16;
+                            // Check 12-bits overflow
+                            if self.index & !RAM_MASK != 0 {
+                                self.set_flag();
+                                self.index &= RAM_MASK;
                             }
                         }
                     }
@@ -675,7 +694,7 @@ impl Chirp8 {
                                 self.registers[i as usize];
                         }
                         // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
-                        if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                        if self.quirks.contains(QuirkFlags::INC_INDEX) {
                             self.index = (self.index.wrapping_add(end_index as u16)) & RAM_MASK;
                         }
                     }
@@ -687,7 +706,7 @@ impl Chirp8 {
                                 self.ram[((self.index.wrapping_add(i)) & RAM_MASK) as usize];
                         }
                         // if mode == SuperChip1.0 self.index = (self.index + (end_index as u16) - 1) & RAM_MASK;
-                        if matches!(self.mode, Chirp8Mode::CosmacChip8 | Chirp8Mode::XOChip) {
+                        if self.quirks.contains(QuirkFlags::INC_INDEX) {
                             self.index = (self.index.wrapping_add(end_index as u16)) & RAM_MASK;
                         }
                     }
@@ -776,7 +795,7 @@ impl Chirp8 {
 
     /// Clears the selected screen planes.
     fn clear_planes(&mut self) {
-        if self.mode != Chirp8Mode::XOChip || self.plane_selection & PLANES_MASK == PLANES_MASK {
+        if self.plane_selection & PLANES_MASK == PLANES_MASK {
             self.clear_display();
         } else {
             for plane in 0..DISPLAY_PLANES {
@@ -811,12 +830,18 @@ impl Chirp8 {
             x_y_coordinates.1 % max_height as u8,
         );
 
-        // Number of color planes, do sprites wrap around screen edges.
-        let (planes_count, wrapping) = if self.mode != Chirp8Mode::XOChip {
-            (1, false)
+        // Number of color planes
+        let planes_count = if self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES) {
+            DISPLAY_PLANES
         } else {
-            (DISPLAY_PLANES, true)
+            1
         };
+        // Do sprites wrap around screen edges.
+        let wrapping = !self.quirks.contains(if self.high_resolution {
+            QuirkFlags::CLIP_SPRITES_HIRES
+        } else {
+            QuirkFlags::CLIP_SPRITES_LORES
+        });
 
         // The number of planes drawn so far.
         let mut drawn_planes = 0;
@@ -892,12 +917,18 @@ impl Chirp8 {
         /// Bytes per line for large sprites.
         const BYTES_PER_LINE: u16 = 2;
 
-        // Number of color planes, do sprites wrap around screen edges.
-        let (planes_count, wrapping) = if self.mode != Chirp8Mode::XOChip {
-            (1, false)
+        // Number of color planes
+        let planes_count = if self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES) {
+            DISPLAY_PLANES
         } else {
-            (DISPLAY_PLANES, true)
+            1
         };
+        // Do sprites wrap around screen edges.
+        let wrapping = !self.quirks.contains(if self.high_resolution {
+            QuirkFlags::CLIP_SPRITES_HIRES
+        } else {
+            QuirkFlags::CLIP_SPRITES_LORES
+        });
 
         // In SChip mode, VF is set to the number of colliding rows, not just 0 or 1.
         // Although disabled on XO-chip, this quirk is handled as VF being the number of colliding rows on all planes.
@@ -990,10 +1021,11 @@ impl Chirp8 {
         };
 
         // VF counts the number of colliding rows instead of just being set to 0 or 1.
-        let colliding_rows_quirk = matches!(
-            self.mode,
-            Chirp8Mode::SuperChip1_1 | Chirp8Mode::SuperChipModern
-        ) && self.high_resolution;
+        let colliding_rows_quirk = self.quirks.contains(if self.high_resolution {
+            QuirkFlags::COLLISION_COUNT_HIRES
+        } else {
+            QuirkFlags::COLLISION_COUNT_HIRES
+        });
 
         if large_sprite {
             // Handle instruction DXY0 : display 16x16 sprite (height is 16, not 0)
@@ -1019,20 +1051,15 @@ impl Chirp8 {
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll =
-            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
-                if self.high_resolution {
-                    scroll
-                } else {
-                    scroll * 2
-                }
+        let scroll =
+            if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
+                scroll * 2
             } else {
                 scroll
             } as usize;
-        self.display_buffer.rotate_left(actual_scroll);
+        self.display_buffer.rotate_left(scroll);
         // Bottom of screen is black.
-        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - actual_scroll)..DISPLAY_HEIGHT]
-        {
+        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT] {
             black_row.fill(PIXEL_OFF);
         }
     }
@@ -1040,56 +1067,44 @@ impl Chirp8 {
     /// Scrolls down display by `scroll` pixels.
     fn scroll_down(&mut self, scroll: u8) {
         // mode == Cosmac Chip 8 is not checked, should not happen.
-        let actual_scroll =
-            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
-                if self.high_resolution {
-                    scroll
-                } else {
-                    scroll * 2
-                }
+        let scroll =
+            if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
+                scroll * 2
             } else {
                 scroll
             } as usize;
-        self.display_buffer.rotate_right(actual_scroll);
+        self.display_buffer.rotate_right(scroll);
         // Top of screen is black.
-        for black_row in &mut self.display_buffer[0..actual_scroll] {
+        for black_row in &mut self.display_buffer[0..scroll] {
             black_row.fill(PIXEL_OFF);
         }
     }
 
     /// Scrolls left display by `scroll` pixels.
     fn scroll_left(&mut self, scroll: u8) {
-        let actual_scroll =
-            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
-                if self.high_resolution {
-                    scroll
-                } else {
-                    scroll * 2
-                }
+        let scroll =
+            if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
+                scroll * 2
             } else {
                 scroll
             } as usize;
         for row in &mut self.display_buffer {
-            row.rotate_left(actual_scroll);
-            row[(DISPLAY_WIDTH - actual_scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
+            row.rotate_left(scroll);
+            row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
         }
     }
 
     /// Scrolls right display by `scroll` pixels.
     fn scroll_right(&mut self, scroll: u8) {
-        let actual_scroll =
-            if self.mode == Chirp8Mode::SuperChipModern || self.mode == Chirp8Mode::XOChip {
-                if self.high_resolution {
-                    scroll
-                } else {
-                    scroll * 2
-                }
+        let scroll =
+            if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
+                scroll * 2
             } else {
                 scroll
             } as usize;
         for row in &mut self.display_buffer {
-            row.rotate_right(actual_scroll);
-            row[0..actual_scroll].fill(PIXEL_OFF);
+            row.rotate_right(scroll);
+            row[0..scroll].fill(PIXEL_OFF);
         }
     }
 
@@ -1133,7 +1148,7 @@ impl Chirp8 {
         &self.display_buffer
     }
 
-    /// Access the 128 1-bit samples in the audio buffer. 
+    /// Access the 128 1-bit samples in the audio buffer.
     pub fn get_audio_buffer(&self) -> &[u8; AUDIO_BUFFER_SIZE] {
         &self.audio_buffer
     }
@@ -1596,13 +1611,13 @@ mod test {
     }
 
     #[test]
-    fn test_pitch(){
+    fn test_pitch() {
         let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
         // Values given in https://johnearnest.github.io/Octo/docs/XO-ChipSpecification.html
 
         emulator.pitch = 247;
         let rate_log2 = emulator.get_audio_bit_rate_log2_hz();
-        const LOG2_56200_06 : f32 = 15.778284050238645;
+        const LOG2_56200_06: f32 = 15.778284050238645;
 
         assert_eq!(rate_log2, LOG2_56200_06);
     }
