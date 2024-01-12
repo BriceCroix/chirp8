@@ -1594,5 +1594,16 @@ mod test {
         assert_eq!(emulator.display_buffer[25][17], repeat_bits(0b11, 2));
         assert_eq!(emulator.registers[FLAG_REGISTER_INDEX], 1);
     }
-    // TODO : test other opcodes
+
+    #[test]
+    fn test_pitch(){
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        // Values given in https://johnearnest.github.io/Octo/docs/XO-ChipSpecification.html
+
+        emulator.pitch = 247;
+        let rate_log2 = emulator.get_audio_bit_rate_log2_hz();
+        const LOG2_56200_06 : f32 = 15.778284050238645;
+
+        assert_eq!(rate_log2, LOG2_56200_06);
+    }
 }
