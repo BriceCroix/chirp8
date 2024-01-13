@@ -19,7 +19,12 @@ pub struct App {
 }
 
 impl App {
-    fn new(rom: &[u8], mode: chirp8::Chirp8Mode, keyboard_layout: KeyboardLayout) -> App {
+    fn new(
+        rom: &[u8],
+        mode: chirp8::Chirp8Mode,
+        keyboard_layout: KeyboardLayout,
+        speed: Option<usize>,
+    ) -> App {
         const WIDTH: u32 = (chirp8::DISPLAY_WIDTH * PIXELS_PER_CELL) as u32;
         const HEIGHT: u32 = (chirp8::DISPLAY_HEIGHT * PIXELS_PER_CELL) as u32;
 
@@ -48,6 +53,9 @@ impl App {
             keyboard_layout: keyboard_layout,
         };
         app.emulator.load_rom(rom);
+        if let Option::Some(speed) = speed {
+            app.emulator.set_steps_per_frame(speed);
+        }
         app
     }
 
@@ -76,7 +84,7 @@ impl App {
             // Draw a square for "on" pixel
             for i in 0..DISPLAY_HEIGHT {
                 for j in 0..DISPLAY_WIDTH {
-                    if emulator_screen[i][j] != 0{
+                    if emulator_screen[i][j] != 0 {
                         let color = emulator_screen[i][j] as f32 / 255f32;
                         let (i_px, j_px) = Self::get_cell_pixel_coordinates(i, j);
                         rectangle(
@@ -166,7 +174,7 @@ impl App {
 
     pub fn run(&mut self) {
         let update_per_second = chirp8::REFRESH_RATE_HZ;
-        self.window.set_max_fps(120);
+        self.window.set_max_fps(60);
         self.window.set_ups(update_per_second as u64);
         self.window.set_lazy(false);
 
@@ -211,19 +219,28 @@ fn read_file_bytes(file_path: &str) -> Result<Vec<u8>, std::io::Error> {
 }
 
 /// Function to parse program options.
-/// Returns the rom file path, chosen chip-8 mode, and keyboard layout.
-fn parse_arguments(args: &std::vec::Vec<String>) -> (String, chirp8::Chirp8Mode, KeyboardLayout) {
+/// Returns :
+/// - The rom file path
+/// - Chosen chip-8 mode
+/// - Keyboard layout
+/// - Optional emulator steps per frame.
+fn parse_arguments(
+    args: &std::vec::Vec<String>,
+) -> (String, chirp8::Chirp8Mode, KeyboardLayout, Option<usize>) {
     let mut opts = getopts::Options::new();
 
     opts.optflag("c", "chip", "Use original Chip-8");
     opts.optflag("s", "super-chip", "Use Super Chip 1.1");
     opts.optflag("m", "modern-super-chip", "Use Modernized Super Chip");
     opts.optflag("x", "xo-chip", "Use XO-Chip");
+
     opts.optflag(
         "a",
         "azerty",
         "Use Azerty keyboard layout instead of Qwerty",
     );
+
+    opts.optopt("", "speed", "Number of emulator steps per frame", "COUNT");
 
     // Parse options
     let matches = match opts.parse(&args[1..]) {
@@ -261,7 +278,18 @@ fn parse_arguments(args: &std::vec::Vec<String>) -> (String, chirp8::Chirp8Mode,
         KeyboardLayout::Qwerty
     };
 
-    (file_path, mode, layout)
+    let speed = if let Option::Some(speed) = matches.opt_str("speed") {
+        if let Option::Some(speed) = usize::from_str_radix(&speed, 10).ok() {
+            Option::Some(speed)
+        } else {
+            eprintln!("Invalid speed option {}", speed);
+            Option::None
+        }
+    } else {
+        Option::None
+    };
+
+    (file_path, mode, layout, speed)
 }
 
 fn main() {
@@ -274,12 +302,12 @@ fn main() {
         return;
     }
 
-    let (file_path, mode, layout) = parse_arguments(&args);
+    let (file_path, mode, layout, speed) = parse_arguments(&args);
 
     match read_file_bytes(&file_path) {
         Ok(rom) => {
             // Create a new app and run it.
-            let mut app = App::new(rom.as_slice(), mode, layout);
+            let mut app = App::new(rom.as_slice(), mode, layout, speed);
             app.run();
         }
         Err(err) => eprintln!("Error reading file: {}", err),
