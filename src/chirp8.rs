@@ -245,12 +245,12 @@ impl Chirp8 {
             Chirp8Mode::XOChip => 30,
         };
 
-        let plane_selection = if mode == Chirp8Mode::XOChip {
+        let plane_selection = if quirks.contains(QuirkFlags::USE_SEVERAL_PLANES) {
             // First plane selected, repeated 4 times.
             repeat_bits(0b01, DISPLAY_PLANES)
         } else {
             // Draw on all planes.
-            repeat_bits(1, 1)
+            !0
         };
 
         // Fill audio buffer with 128-samples long square wave. (8x16)
@@ -1165,7 +1165,9 @@ impl Chirp8 {
                 scroll
             } as usize;
 
-        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+        if !self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES)
+            || self.plane_selection & PLANES_MASK == PLANES_MASK
+        {
             // Scroll all planes
             self.display_buffer.rotate_left(scroll);
             // Bottom of screen is black.
@@ -1206,7 +1208,9 @@ impl Chirp8 {
             } else {
                 scroll
             } as usize;
-        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+        if !self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES)
+            || self.plane_selection & PLANES_MASK == PLANES_MASK
+        {
             self.display_buffer.rotate_right(scroll);
             // Top of screen is black.
             for black_row in &mut self.display_buffer[0..scroll] {
@@ -1246,7 +1250,9 @@ impl Chirp8 {
             } else {
                 scroll
             } as usize;
-        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+        if !self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES)
+            || self.plane_selection & PLANES_MASK == PLANES_MASK
+        {
             for row in &mut self.display_buffer {
                 row.rotate_left(scroll);
                 row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
@@ -1282,7 +1288,9 @@ impl Chirp8 {
             } else {
                 scroll
             } as usize;
-        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+        if !self.quirks.contains(QuirkFlags::USE_SEVERAL_PLANES)
+            || self.plane_selection & PLANES_MASK == PLANES_MASK
+        {
             for row in &mut self.display_buffer {
                 row.rotate_right(scroll);
                 row[0..scroll].fill(PIXEL_OFF);
@@ -1548,29 +1556,62 @@ mod test {
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[32][67], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[32][67],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[32][67], repeat_bits(0b00, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[39][67], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[32][67],
+            repeat_bits(0b00, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[39][67],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
 
         emulator.pc = PROGRAM_START as u16;
         emulator.high_resolution = false;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[39][67], repeat_bits(0b00, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[29][67], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[39][67],
+            repeat_bits(0b00, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[29][67],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[29][67], repeat_bits(0b00, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[43][67], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[29][67],
+            repeat_bits(0b00, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[43][67],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
     }
 
     #[test]
@@ -1588,26 +1629,50 @@ mod test {
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[37][71], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[37][71],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][71], repeat_bits(0b00, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b11, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][71],
+            repeat_bits(0b00, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b11, DISPLAY_PLANES)
+        );
 
         emulator.pc = PROGRAM_START as u16;
         emulator.high_resolution = false;
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[37][75], repeat_bits(0b10, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b01, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[37][75],
+            repeat_bits(0b10, DISPLAY_PLANES)
+        );
 
         emulator.step();
 
-        assert_eq!(emulator.display_buffer[37][75], repeat_bits(0b00, DISPLAY_PLANES));
-        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b11, DISPLAY_PLANES));
+        assert_eq!(
+            emulator.display_buffer[37][75],
+            repeat_bits(0b00, DISPLAY_PLANES)
+        );
+        assert_eq!(
+            emulator.display_buffer[37][67],
+            repeat_bits(0b11, DISPLAY_PLANES)
+        );
     }
 
     #[test]
