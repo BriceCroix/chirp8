@@ -319,8 +319,12 @@ impl Chirp8 {
 
     /// Run as many instruction as necessary to generate a frame.
     pub fn run_frame(&mut self) {
-        for _ in 0..self.steps_per_frame {
+        // Do-while
+        loop {
             self.step();
+            if self.steps_since_frame == 0 {
+                break;
+            }
         }
     }
 
@@ -832,6 +836,14 @@ impl Chirp8 {
             PROGRAM_COUNTER_STEP
         };
         self.pc = self.pc.wrapping_add(offset) & RAM_MASK;
+    }
+
+    /// Modifies the number of CPU steps executed between each frame.
+    pub fn set_steps_per_frame(&mut self, steps: usize) {
+        while self.steps_since_frame != 0 {
+            self.step()
+        }
+        self.steps_per_frame = steps;
     }
 
     #[allow(unused_variables)]
