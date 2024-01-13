@@ -340,9 +340,9 @@ impl Chirp8 {
         self.pc = PROGRAM_START as u16;
         self.registers.fill(0);
         self.display_changed = true;
-        for row in &mut self.display_buffer {
-            row.fill(PIXEL_OFF);
-        }
+        self.clear_display();
+        self.high_resolution = false;
+        self.plane_selection = repeat_bits(0b01, DISPLAY_PLANES);
     }
 
     /// Forces the interpreter to take given number of `steps`.
@@ -376,8 +376,6 @@ impl Chirp8 {
         let nn = 0xFF & instruction as u8;
         // The second, third and fourth nibbles. A 12-bit immediate memory address.
         let nnn = 0x0FFF & instruction;
-
-        // TODO : make so that modes that do not know instructions treat them as NOP (example : chip 8 ignores scroll).
 
         match opcode {
             0x0 => match nn {
@@ -1160,33 +1158,83 @@ impl Chirp8 {
 
     /// Scrolls up display by `scroll` pixels.
     fn scroll_up(&mut self, scroll: u8) {
-        // mode == Cosmac Chip 8 is not checked, should not happen.
         let scroll =
             if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
                 scroll * 2
             } else {
                 scroll
             } as usize;
-        self.display_buffer.rotate_left(scroll);
-        // Bottom of screen is black.
-        for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT] {
-            black_row.fill(PIXEL_OFF);
+
+        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+            // Scroll all planes
+            self.display_buffer.rotate_left(scroll);
+            // Bottom of screen is black.
+            for black_row in &mut self.display_buffer[(DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT] {
+                black_row.fill(PIXEL_OFF);
+            }
+        } else {
+            // Scroll plane by plane
+            for plane in 0..DISPLAY_PLANES {
+                let plane_mask = repeat_bits(1 << plane, DISPLAY_PLANES);
+                let not_plane_mask = !plane_mask;
+                if plane_mask & self.plane_selection == 0 {
+                    continue;
+                }
+                for row in 0..(DISPLAY_HEIGHT - scroll) {
+                    let source_row = row + scroll;
+                    for col in 0..DISPLAY_WIDTH {
+                        let source = self.display_buffer[source_row][col];
+                        let pixel = &mut self.display_buffer[row][col];
+                        *pixel = (*pixel & not_plane_mask) | (source & plane_mask);
+                    }
+                }
+                // Bottom of screen
+                for row in (DISPLAY_HEIGHT - scroll)..DISPLAY_HEIGHT {
+                    self.display_buffer[row]
+                        .iter_mut()
+                        .for_each(|pixel| *pixel &= not_plane_mask);
+                }
+            }
         }
     }
 
     /// Scrolls down display by `scroll` pixels.
     fn scroll_down(&mut self, scroll: u8) {
-        // mode == Cosmac Chip 8 is not checked, should not happen.
         let scroll =
             if !self.quirks.contains(QuirkFlags::SCROLL_HALF_PIXEL) && !self.high_resolution {
                 scroll * 2
             } else {
                 scroll
             } as usize;
-        self.display_buffer.rotate_right(scroll);
-        // Top of screen is black.
-        for black_row in &mut self.display_buffer[0..scroll] {
-            black_row.fill(PIXEL_OFF);
+        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+            self.display_buffer.rotate_right(scroll);
+            // Top of screen is black.
+            for black_row in &mut self.display_buffer[0..scroll] {
+                black_row.fill(PIXEL_OFF);
+            }
+        } else {
+            // Scroll plane by plane
+            for plane in 0..DISPLAY_PLANES {
+                let plane_mask = repeat_bits(1 << plane, DISPLAY_PLANES);
+                let not_plane_mask = !plane_mask;
+                if plane_mask & self.plane_selection == 0 {
+                    continue;
+                }
+                for row in (scroll..DISPLAY_HEIGHT).rev() {
+                    let source_row = row - scroll;
+                    for col in 0..DISPLAY_WIDTH {
+                        let source = self.display_buffer[source_row][col];
+                        let pixel = &mut self.display_buffer[row][col];
+                        *pixel = (*pixel & not_plane_mask) | (source & plane_mask);
+                    }
+                }
+                // Top of screen
+                for row in 0..scroll {
+                    self.display_buffer[row]
+                        .iter_mut()
+                        .for_each(|pixel| *pixel &= not_plane_mask);
+                }
+            }
         }
     }
 
@@ -1198,9 +1246,31 @@ impl Chirp8 {
             } else {
                 scroll
             } as usize;
-        for row in &mut self.display_buffer {
-            row.rotate_left(scroll);
-            row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
+        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+            for row in &mut self.display_buffer {
+                row.rotate_left(scroll);
+                row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH].fill(PIXEL_OFF);
+            }
+        } else {
+            // Scroll plane by plane
+            for plane in 0..DISPLAY_PLANES {
+                let plane_mask = repeat_bits(1 << plane, DISPLAY_PLANES);
+                let not_plane_mask = !plane_mask;
+                if plane_mask & self.plane_selection == 0 {
+                    continue;
+                }
+                for row in &mut self.display_buffer {
+                    for col in 0..(DISPLAY_WIDTH - scroll) {
+                        let source = row[col + scroll];
+                        let pixel = &mut row[col];
+                        *pixel = (*pixel & not_plane_mask) | (source & plane_mask);
+                        // Right of screen
+                        row[(DISPLAY_WIDTH - scroll)..DISPLAY_WIDTH]
+                            .iter_mut()
+                            .for_each(|pixel| *pixel &= not_plane_mask);
+                    }
+                }
+            }
         }
     }
 
@@ -1212,9 +1282,31 @@ impl Chirp8 {
             } else {
                 scroll
             } as usize;
-        for row in &mut self.display_buffer {
-            row.rotate_right(scroll);
-            row[0..scroll].fill(PIXEL_OFF);
+        if self.plane_selection & PLANES_MASK == PLANES_MASK {
+            for row in &mut self.display_buffer {
+                row.rotate_right(scroll);
+                row[0..scroll].fill(PIXEL_OFF);
+            }
+        } else {
+            // Scroll plane by plane
+            for plane in 0..DISPLAY_PLANES {
+                let plane_mask = repeat_bits(1 << plane, DISPLAY_PLANES);
+                let not_plane_mask = !plane_mask;
+                if plane_mask & self.plane_selection == 0 {
+                    continue;
+                }
+                for row in &mut self.display_buffer {
+                    for col in (scroll..DISPLAY_WIDTH).rev() {
+                        let source = row[col - scroll];
+                        let pixel = &mut row[col];
+                        *pixel = (*pixel & not_plane_mask) | (source & plane_mask);
+                        // Right of screen
+                        row[0..scroll]
+                            .iter_mut()
+                            .for_each(|pixel| *pixel &= not_plane_mask);
+                    }
+                }
+            }
         }
     }
 
@@ -1370,17 +1462,15 @@ mod test {
     }
 
     #[test]
-    fn opcode_scroll_vertical() {
+    fn opcode_scroll_vertical_all() {
         let rom = [
-            0x00, 0xB5, // Scroll up by 5
+            0x00, 0xB5, // Scroll up by 5 (Unofficial Super Chip)
             0x00, 0xC7, // Scroll down by 7
-            0x80, // Sprite with one pixel to the left
         ];
 
         let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
         emulator.display_buffer[37][67] = PIXEL_ON;
-        emulator.index = PROGRAM_START as u16 + 4;
         emulator.high_resolution = true;
 
         emulator.step();
@@ -1408,17 +1498,15 @@ mod test {
     }
 
     #[test]
-    fn opcode_scroll_horizontal() {
+    fn opcode_scroll_horizontal_all() {
         let rom = [
             0x00, 0xFB, // Scroll right
             0x00, 0xFC, // Scroll left
-            0x80, // Sprite with one pixel to the left
         ];
 
         let mut emulator = Chirp8::new(Chirp8Mode::SuperChipModern);
         emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
         emulator.display_buffer[37][67] = PIXEL_ON;
-        emulator.index = PROGRAM_START as u16 + 4;
         emulator.high_resolution = true;
 
         emulator.step();
@@ -1443,6 +1531,83 @@ mod test {
 
         assert_eq!(emulator.display_buffer[37][75], PIXEL_OFF);
         assert_eq!(emulator.display_buffer[37][67], PIXEL_ON);
+    }
+
+    #[test]
+    fn opcode_scroll_vertical_single_plane() {
+        let rom = [
+            0x00, 0xD5, // Scroll up by 5 (XO-Chip)
+            0x00, 0xC7, // Scroll down by 7
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+        emulator.display_buffer[37][67] = repeat_bits(0b11, DISPLAY_PLANES);
+        emulator.high_resolution = true;
+        emulator.plane_selection = repeat_bits(0b10, DISPLAY_PLANES);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[32][67], repeat_bits(0b10, DISPLAY_PLANES));
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[32][67], repeat_bits(0b00, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[39][67], repeat_bits(0b10, DISPLAY_PLANES));
+
+        emulator.pc = PROGRAM_START as u16;
+        emulator.high_resolution = false;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[39][67], repeat_bits(0b00, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[29][67], repeat_bits(0b10, DISPLAY_PLANES));
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[29][67], repeat_bits(0b00, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[43][67], repeat_bits(0b10, DISPLAY_PLANES));
+    }
+
+    #[test]
+    fn opcode_scroll_horizontal_single_plane() {
+        let rom = [
+            0x00, 0xFB, // Scroll right
+            0x00, 0xFC, // Scroll left
+        ];
+
+        let mut emulator = Chirp8::new(Chirp8Mode::XOChip);
+        emulator.ram[PROGRAM_START..PROGRAM_START + rom.len()].copy_from_slice(&rom);
+        emulator.display_buffer[37][67] = repeat_bits(0b11, DISPLAY_PLANES);
+        emulator.high_resolution = true;
+        emulator.plane_selection = repeat_bits(0b10, DISPLAY_PLANES);
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[37][71], repeat_bits(0b10, DISPLAY_PLANES));
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][71], repeat_bits(0b00, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b11, DISPLAY_PLANES));
+
+        emulator.pc = PROGRAM_START as u16;
+        emulator.high_resolution = false;
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b01, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[37][75], repeat_bits(0b10, DISPLAY_PLANES));
+
+        emulator.step();
+
+        assert_eq!(emulator.display_buffer[37][75], repeat_bits(0b00, DISPLAY_PLANES));
+        assert_eq!(emulator.display_buffer[37][67], repeat_bits(0b11, DISPLAY_PLANES));
     }
 
     #[test]
