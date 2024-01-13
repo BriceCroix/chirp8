@@ -19,8 +19,13 @@ rand = {version = "0.8.5", features = ["small_rng"], default-features = false}
 
 [dev-dependencies]
 bmp = "0.5.0"
+criterion = "0.5.1"
 getopts = "0.2.21"
 piston = "0.55.0"
 piston2d-graphics = "0.44.0"
 piston2d-opengl_graphics = "0.83.0"
 piston_window = "0.131.0"
+
+[[bench]]
+name = "benchmarks"
+harness = false
