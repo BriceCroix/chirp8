@@ -179,7 +179,7 @@ pub struct Chirp8 {
     keys_previous: [bool; KEYS_COUNT as usize],
     /// On Super Chip 8 and above, true when high-resolution is enabled.
     high_resolution: bool,
-    /// On XO-Chip, bitmask of the selected planes.
+    /// On XO-Chip, bit-mask of the selected planes.
     /// All bits are used ! For P planes (2 on XO-Chip), these bits are repeated every P bits :
     /// - P=1 : [0b00000000, 0b11111111]
     /// - P=2 : [0b00_00_00_00, 0b01_01_01_01, 0b10_10_10_10, 0b11_11_11_11]
@@ -217,7 +217,7 @@ impl Chirp8 {
     }
 
     /// Creates a new emulator, which will behave according to given `mode` and with custom quirks
-    /// behaviour.
+    /// behavior.
     pub fn with_custom_quirks(mode: Chirp8Mode, quirks: QuirkFlags) -> Self {
         // Create RAM and display buffer
         cfg_if::cfg_if! {
@@ -352,7 +352,7 @@ impl Chirp8 {
     }
 
     /// Execute one machine instruction, decrement timers if necessary.
-    /// If the interpreter is in idle, if waitinf for an interrupt for instance, the step is not taken,
+    /// If the interpreter is in idle, if waiting for an interrupt for instance, the step is not taken,
     /// which is to say the `steps` counter is not incremented.
     pub fn step(&mut self) {
         // Big endian instruction
@@ -377,10 +377,6 @@ impl Chirp8 {
 
         match opcode {
             0x0 => match nn {
-                // NOP
-                0x00 => {}
-                // // Exit from interpreter (chip8run)
-                // 0x10..=0x1F => self.reset(),
                 // Clear screen
                 0xE0 => {
                     if self.mode != Chirp8Mode::XOChip {
@@ -392,32 +388,76 @@ impl Chirp8 {
                 // Return from subroutine
                 0xEE => self.pc = self.stack.pop().ok().unwrap(),
                 // Exit from interpreter (Super-Chip)
-                0xFD => self.reset(),
+                0xFD => {
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.reset()
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
                 // Disable High-res (Super-Chip and above)
                 0xFE => {
-                    self.high_resolution = false;
-                    if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
-                        self.clear_display();
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.high_resolution = false;
+                        if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
+                            self.clear_display();
+                        }
+                    } else {
+                        self.print_unknown_instruction(instruction)
                     }
                 }
                 // Enable High-res (Super-chip and above)
                 0xFF => {
-                    self.high_resolution = true;
-                    if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
-                        self.clear_display();
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.high_resolution = true;
+                        if self.quirks.contains(QuirkFlags::CLEAR_ON_RES) {
+                            self.clear_display();
+                        }
+                    } else {
+                        self.print_unknown_instruction(instruction)
                     }
                 }
                 // Scroll up N pixels (XO-Chip)
-                0xD0..=0xDF => self.scroll_up(n),
+                0xD0..=0xDF => {
+                    if self.mode == Chirp8Mode::XOChip {
+                        self.scroll_up(n)
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
                 // Scroll up N pixels (Unofficial Super Chip)
-                0xB0..=0xBF => self.scroll_up(n),
-                // Scroll down N pixels (Super Chip)
-                0xC0..=0xCF => self.scroll_down(n),
-                // Scroll right 4 pixels (Super Chip)
-                0xFB => self.scroll_right(4),
-                // Scroll left 4 pixels (Super Chip)
-                0xFC => self.scroll_left(4),
-                _ => panic!("Unrecognized 0 instruction 0x{:04X}", instruction),
+                0xB0..=0xBF => {
+                    if self.mode == Chirp8Mode::SuperChipModern {
+                        self.scroll_up(n)
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
+                // Scroll down N pixels (Super Chip and above)
+                0xC0..=0xCF => {
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.scroll_down(n)
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
+                // Scroll right 4 pixels (Super Chip and above)
+                0xFB => {
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.scroll_right(4)
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
+                // Scroll left 4 pixels (Super Chip and above)
+                0xFC => {
+                    if self.mode >= Chirp8Mode::SuperChip1_1 {
+                        self.scroll_left(4)
+                    } else {
+                        self.print_unknown_instruction(instruction)
+                    }
+                }
+                _ => self.print_unknown_instruction(instruction),
             },
             // Jump
             0x1 => self.pc = nnn,
@@ -448,31 +488,39 @@ impl Chirp8 {
                     }
                     // 0x5XY2 : Save vx - vy (XO-chip)
                     2 => {
-                        if x < y {
-                            let end = self.index as usize + y - x;
-                            self.ram[self.index as usize..=end]
-                                .copy_from_slice(&self.registers[x..=y]);
+                        if self.mode == Chirp8Mode::XOChip {
+                            if x < y {
+                                let end = self.index as usize + y - x;
+                                self.ram[self.index as usize..=end]
+                                    .copy_from_slice(&self.registers[x..=y]);
+                            } else {
+                                let end = self.index as usize + x - y;
+                                self.ram[self.index as usize..=end]
+                                    .copy_from_slice(&self.registers[y..=x]);
+                                self.ram[self.index as usize..=end].reverse();
+                            }
                         } else {
-                            let end = self.index as usize + x - y;
-                            self.ram[self.index as usize..=end]
-                                .copy_from_slice(&self.registers[y..=x]);
-                            self.ram[self.index as usize..=end].reverse();
+                            self.print_unknown_instruction(instruction)
                         }
                     }
                     // 0x5XY3 : Load vx - vy (XO-chip)
                     3 => {
-                        if x < y {
-                            let end = self.index as usize + y - x;
-                            self.registers[x..=y]
-                                .copy_from_slice(&self.ram[self.index as usize..=end]);
+                        if self.mode == Chirp8Mode::XOChip {
+                            if x < y {
+                                let end = self.index as usize + y - x;
+                                self.registers[x..=y]
+                                    .copy_from_slice(&self.ram[self.index as usize..=end]);
+                            } else {
+                                let end = self.index as usize + x - y;
+                                self.registers[y..=x]
+                                    .copy_from_slice(&self.ram[self.index as usize..=end]);
+                                self.registers[y..=x].reverse();
+                            }
                         } else {
-                            let end = self.index as usize + x - y;
-                            self.registers[y..=x]
-                                .copy_from_slice(&self.ram[self.index as usize..=end]);
-                            self.registers[y..=x].reverse();
+                            self.print_unknown_instruction(instruction)
                         }
                     }
-                    _ => panic!("Unrecognized (0x5) instruction 0x{:04X}", n),
+                    _ => self.print_unknown_instruction(instruction),
                 }
             }
             // Skip
@@ -559,7 +607,7 @@ impl Chirp8 {
                     self.registers[x] <<= 1;
                     self.registers[FLAG_REGISTER_INDEX] = flag;
                 }
-                _ => panic!("Unrecognized logic (0x8) instruction 0x{:04X}", instruction),
+                _ => self.print_unknown_instruction(instruction),
             },
             // Set index
             0xA => self.index = nnn,
@@ -614,22 +662,32 @@ impl Chirp8 {
                         self.skip_next_instruction();
                     }
                 }
-                _ => panic!("Unrecognized E instruction 0x{:04X}", instruction),
+                _ => self.print_unknown_instruction(instruction),
             },
             0xF => {
                 match nn {
-                    // F000 : Load 16-bits adress in index (XO-Chip)
+                    // F000 : Load 16-bits address in index (XO-Chip)
                     0x00 => {
-                        if self.mode == Chirp8Mode::XOChip && x == 0 {
-                            // The next "instruction" is actually a 16-bits address
-                            self.index = self.next_instruction();
-                            self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP);
+                        if self.mode == Chirp8Mode::XOChip {
+                            if self.mode == Chirp8Mode::XOChip && x == 0 {
+                                // The next "instruction" is actually a 16-bits address
+                                self.index = self.next_instruction();
+                                self.pc = self.pc.wrapping_add(PROGRAM_COUNTER_STEP);
+                            } else {
+                                self.print_unknown_instruction(instruction);
+                            }
                         } else {
-                            panic!("Unrecognized F instruction 0x{:04X}", instruction)
+                            self.print_unknown_instruction(instruction)
                         }
                     }
                     // FX01 Plane, select plane(s) X (XO-Chip)
-                    0x01 => self.plane_selection = repeat_bits(x as u8, DISPLAY_PLANES),
+                    0x01 => {
+                        if self.mode == Chirp8Mode::XOChip {
+                            self.plane_selection = repeat_bits(x as u8, DISPLAY_PLANES)
+                        } else {
+                            self.print_unknown_instruction(instruction)
+                        }
+                    }
 
                     // Timers set VX
                     0x07 => self.registers[x] = self.delay_timer,
@@ -669,12 +727,16 @@ impl Chirp8 {
                         // point I to a 10-byte font sprite for the digit in the lower nibble of VX (only digits 0-9).
                         // The following is the SuperChip1.1 behavior.
                         self.index = FONT_SPRITES_ADDRESS as u16
-                            + FONT_SPRITES_STEP as u16 * self.registers[x & 0xF] as u16;
+                            + FONT_SPRITES_STEP as u16 * self.registers[x] as u16;
                     }
-                    // FX30: Large font character (Super-Chip 1.1)
+                    // FX30: Large font character (Super-Chip 1.1 and above)
                     0x30 => {
-                        self.index = FONT_SPRITES_HIGH_ADDRESS as u16
-                            + FONT_SPRITES_HIGH_STEP as u16 * self.registers[x & 0xF] as u16;
+                        if self.mode >= Chirp8Mode::SuperChip1_1 {
+                            self.index = FONT_SPRITES_HIGH_ADDRESS as u16
+                                + FONT_SPRITES_HIGH_STEP as u16 * self.registers[x] as u16;
+                        } else {
+                            self.print_unknown_instruction(instruction)
+                        }
                     }
 
                     // FX33: Binary-coded decimal conversion
@@ -712,27 +774,35 @@ impl Chirp8 {
                     }
                     // FX75 : Save to flags registers (Super-Chip 1.0 and above)
                     0x75 => {
-                        let count = if self.mode == Chirp8Mode::XOChip {
-                            x
+                        if self.mode >= Chirp8Mode::SuperChip1_1 {
+                            let count = if self.mode == Chirp8Mode::XOChip {
+                                x
+                            } else {
+                                x & 0x7
+                            };
+                            self.rpl_registers[0..count].copy_from_slice(&self.registers[0..count]);
                         } else {
-                            x & 0x7
-                        };
-                        self.rpl_registers[0..count].copy_from_slice(&self.registers[0..count]);
+                            self.print_unknown_instruction(instruction)
+                        }
                     }
                     // FX85 : Load from flags registers (Super-Chip 1.0 and above)
                     0x85 => {
-                        let count = if self.mode == Chirp8Mode::XOChip {
-                            x
+                        if self.mode >= Chirp8Mode::SuperChip1_1 {
+                            let count = if self.mode == Chirp8Mode::XOChip {
+                                x
+                            } else {
+                                x & 0x7
+                            };
+                            self.registers[0..count].copy_from_slice(&self.rpl_registers[0..count]);
                         } else {
-                            x & 0x7
-                        };
-                        self.registers[0..count].copy_from_slice(&self.rpl_registers[0..count]);
+                            self.print_unknown_instruction(instruction)
+                        }
                     }
-                    _ => panic!("Unrecognized E instruction 0x{:04X}", instruction),
+                    _ => self.print_unknown_instruction(instruction),
                 }
             }
 
-            _ => panic!("Unrecognized instruction 0x{:04X}", instruction),
+            _ => self.print_unknown_instruction(instruction),
         }
         // Handle timers
         self.step_timers();
@@ -762,6 +832,34 @@ impl Chirp8 {
             PROGRAM_COUNTER_STEP
         };
         self.pc = self.pc.wrapping_add(offset) & RAM_MASK;
+    }
+
+    #[allow(unused_variables)]
+    fn print_unknown_instruction(&self, instruction: u16) {
+        #[cfg(feature = "std")]
+        {
+            let message = alloc::format!(
+                "Unknown instruction 0x{:04X} in mode '{}', at program counter 0x{:04X} {}.",
+                instruction,
+                match self.mode {
+                    Chirp8Mode::CosmacChip8 => "Chip-8",
+                    Chirp8Mode::SuperChip1_1 => "Super Chip 1.1",
+                    Chirp8Mode::SuperChipModern => "Super Chip Modern",
+                    Chirp8Mode::XOChip => "XO-Chip",
+                },
+                self.pc.wrapping_sub(PROGRAM_COUNTER_STEP),
+                if let Option::Some(address) = self
+                    .pc
+                    .wrapping_sub(PROGRAM_COUNTER_STEP)
+                    .checked_sub(PROGRAM_START as u16)
+                {
+                    alloc::format!("(At program address 0x{:04X})", address)
+                } else {
+                    alloc::string::String::from("(Lost in reserved memory < 0x0200)")
+                }
+            );
+            std::println!("{}", message);
+        }
     }
 
     #[inline]
@@ -1535,7 +1633,7 @@ mod test {
         // 100
         // 100
         // plane 1 is
-        // 011 -> first pixel is xored with previous step.
+        // 011 -> first pixel is XOR'ed with previous step.
         // 100
         // 100
         assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b01, 2));
@@ -1599,7 +1697,7 @@ mod test {
         // 100
         // 100
         // plane 1 is
-        // 011 -> first pixel is xored with previous step.
+        // 011 -> first pixel is XOR'ed with previous step.
         // 100
         // 100
         assert_eq!(emulator.display_buffer[23][17], repeat_bits(0b01, 2));

@@ -15,6 +15,7 @@ The library is compatible with `no_std` environments and can be used to create h
 | :--------------: | :---------------------------------------------------------------------------------------------------- | :-----------------: |
 |     `alloc`      | Allocates the objects that use the most memory on the heap (`Vec<T>`) instead of the stack (`[T; N]`) |         yes         |
 |   `mem_extend`   | Extends the emulator RAM size that grows from 4kb to 64kb, stack or heap depends on `alloc`           |         yes         |
+|      `std`       | Enables printing to the standard output when an unknown program instruction is encountered.           |         yes         |
 
 ## Testing
 
