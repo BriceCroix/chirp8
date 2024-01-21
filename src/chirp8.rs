@@ -1379,6 +1379,13 @@ impl Chirp8 {
 
         LOG2_4000 + ((self.pitch as f32 - 64f32) / 48f32)
     }
+
+    /// Returns the XO-chip audio bit rate in Hertz.
+    /// Each bit in the audio buffer (128 bits) must be played at this rate.
+    #[cfg(feature = "std")]
+    pub fn get_audio_bit_rate_hz(&self) -> f32 {
+        2f32.powf(self.get_audio_bit_rate_log2_hz())
+    }
 }
 
 #[cfg(test)]
