@@ -200,12 +200,12 @@ impl App {
 fn main() {
     // Get the command-line arguments
     let args: Vec<String> = std::env::args().collect();
-    let (file_path, mode, layout, speed) = parse_arguments(&args);
+    let (file_path, mode, layout, ticks_per_frame) = parse_arguments(&args);
 
     match read_file_bytes(&file_path) {
         Ok(rom) => {
             // Create a new app and run it.
-            let mut app = App::new(rom.as_slice(), mode, layout, speed);
+            let mut app = App::new(rom.as_slice(), mode, layout, ticks_per_frame);
             app.run();
         }
         Err(err) => eprintln!("Error reading file: {}", err),

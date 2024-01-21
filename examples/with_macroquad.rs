@@ -24,7 +24,7 @@ fn macroquad_configuration() -> Conf {
 async fn main() {
     // Get the command-line arguments
     let args: Vec<String> = std::env::args().collect();
-    let (file_path, chirp_mode, keyboard_layout, ticks_per_second) = parse_arguments(&args);
+    let (file_path, chirp_mode, keyboard_layout, ticks_per_frame) = parse_arguments(&args);
 
     // Read given command line rom.
     let rom = read_file_bytes(&file_path);
@@ -37,7 +37,7 @@ async fn main() {
     // Create emulator and load given rom.
     let mut emulator = Chirp8::new(chirp_mode);
     emulator.load_rom(&rom);
-    if let Option::Some(speed) = ticks_per_second {
+    if let Option::Some(speed) = ticks_per_frame {
         emulator.set_steps_per_frame(speed);
     }
 
