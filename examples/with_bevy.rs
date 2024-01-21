@@ -28,6 +28,10 @@ struct NewFrameConfig {
     paused: bool,
 }
 
+/// Indicates if the emulator is currently sounding.
+#[derive(Resource)]
+struct IsSounding(bool);
+
 /// Setup function to initialize emulator and insert bevy's resources.
 fn setup(mut commands: Commands) {
     // Get the command-line arguments
@@ -58,10 +62,13 @@ fn setup(mut commands: Commands) {
         timer: Timer::new(
             core::time::Duration::from_secs_f32(1.0 / chirp8::REFRESH_RATE_HZ as f32),
             TimerMode::Repeating,
-        
         ),
-        paused: false
-    })
+        paused: false,
+    });
+}
+
+fn setup_sound(mut commands: Commands) {
+    commands.insert_resource(IsSounding(false));
 }
 
 /// System to handle user input and press keys in the emulator.
@@ -130,7 +137,7 @@ fn emulator_frame_system(
 ) {
     // Do not render a new emulator frame if paused or between frame rate.
     config.timer.tick(time.delta());
-    if config.paused || !config.timer.finished(){
+    if config.paused || !config.timer.finished() {
         return;
     }
 
@@ -149,6 +156,28 @@ fn emulator_frame_system(
     });
 }
 
+/// Inserts and remove audio source depending on the emulator state.
+fn emulator_audio_system(
+    mut commands: Commands,
+    mut pitch_assets: ResMut<Assets<Pitch>>,
+    emulator_resource: Res<EmulatorResource>,
+    mut is_sounding_resource: ResMut<IsSounding>,
+    mut query: Query<Entity, With<AudioSink>>,
+) {
+    if !is_sounding_resource.0 && emulator_resource.emulator.is_sounding() {
+        commands.spawn(PitchBundle {
+            source: pitch_assets.add(Pitch::new(440.0, core::time::Duration::from_millis(1000))),
+            settings: PlaybackSettings::LOOP,
+        });
+        is_sounding_resource.0 = true;
+    } else if is_sounding_resource.0 && !emulator_resource.emulator.is_sounding() {
+        for entity in query.iter_mut() {
+            commands.entity(entity).despawn();
+        }
+        is_sounding_resource.0 = false;
+    }
+}
+
 fn main() {
     let size = PixelBufferSize {
         size: UVec2::new(chirp8::DISPLAY_WIDTH as u32, chirp8::DISPLAY_HEIGHT as u32), // amount of pixels
@@ -159,8 +188,10 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(PixelBufferPlugin)
         .add_systems(Startup, setup)
+        .add_systems(Startup, setup_sound)
         .add_systems(Startup, pixel_buffer_setup(size))
         .add_systems(Update, emulator_input_system)
         .add_systems(Update, emulator_frame_system)
+        .add_systems(Update, emulator_audio_system)
         .run();
 }
