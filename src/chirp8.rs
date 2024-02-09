@@ -79,7 +79,7 @@ const FONT_SPRITES_HIGH: [u8; FONT_SPRITES_HIGH_STEP * FONT_SPRITES_COUNT] = [
     0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, // E
     0xFF, 0xFF, 0xC0, 0xC0, 0xFF, 0xFF, 0xC0, 0xC0, 0xC0, 0xC0  // F
 ];
-/// Refresh rate, number of frames per second.
+/// Refresh rate in Hertz, number of frames per second.
 /// Also dictates the decrease rate of the emulator's timers.
 pub const REFRESH_RATE_HZ: usize = 60;
 /// Number of RPL flags registers. 8 on the HP48, 16 on XO-Chip.
@@ -87,15 +87,15 @@ const RPL_REGISTERS_COUNT: usize = 16;
 /// Number of memory bytes read by CPU at each cycle.
 const PROGRAM_COUNTER_STEP: u16 = 2;
 
-/// Maximum display width, used by Super-chip and XO-chip.
+/// Display width in pixels, in original Chip-8 mode or in low-resolution mode, every pixel is a 2 by 2 square.
 pub const DISPLAY_WIDTH: usize = 128;
-/// Maximum display height, used by Super-chip and XO-chip.
+/// Display height in pixels, in original Chip-8 mode or in low-resolution mode, every pixel is a 2 by 2 square.
 pub const DISPLAY_HEIGHT: usize = 64;
-/// The value of pixel not set, when not in XO-Chip.
+/// The value of pixel not set, when not in XO-Chip where gray nuances are available.
 pub const PIXEL_OFF: u8 = 0x00;
-/// The value of pixel set, when not in XO-Chip.
+/// The value of pixel set, when not in XO-Chip where gray nuances are available.
 pub const PIXEL_ON: u8 = 0xFF;
-/// The value to add to a pixel to get the next value, on XO-Chip.
+/// The value to add to a pixel to get the next color, on XO-Chip.
 /// For 2 display planes, this yields 85 : 0, 85 170, 255.
 pub const PIXEL_STEP: u8 = repeat_bits(1, DISPLAY_PLANES);
 /// Number of display planes used by XO-Chip.
@@ -129,6 +129,11 @@ const fn repeat_bits(value: u8, count: usize) -> u8 {
 
 /// The mode in which the emulator runs, affects the display size and the
 /// way some instruction are handled.
+///
+/// To create an emulator in specific mode (Super-Chip 1.1 here) :
+/// ```
+/// let emulator = Chirp8::new(Chirp8Mode::SuperChip1_1);
+/// ```
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum Chirp8Mode {
     /// Original Cosmac VIP chip-8 mode from 1977, uses 64x32 display.
@@ -148,7 +153,19 @@ pub enum Chirp8Mode {
     // SuperChip1_0
 }
 
-/// Chip-8 Emulator.
+/// Chip-8 Emulator able to execute Chip-8 programs.
+/// Can be configured and used as follow :
+/// ```
+/// let emulator = Chirp8::new(Chirp8Mode::CosmacChip8);
+/// emulator.set_steps_per_frame(10);
+/// let rom = [0x00]; // ...
+/// emulator.load_rom(&my_rom)
+/// emulator.run_frame();
+/// emulator.key_press(0xA);
+/// emulator.run_frame();
+/// emulator.key_release(0xA);
+/// let screen = emulator.get_display_buffer();
+/// ```
 pub struct Chirp8 {
     /// Memory of interpreter.
     ram: Ram,
@@ -218,6 +235,11 @@ impl Chirp8 {
 
     /// Creates a new emulator, which will behave according to given `mode` and with custom quirks
     /// behavior.
+    /// Example :
+    /// ```
+    /// let quirks = QuirkFlags::INC_INDEX | QuirkFlags::USE_SEVERAL_PLANES | QuirkFlags::JUMP_XNN;
+    /// let emulator = Chirp8::with_custom_quirks(Chirp8Mode::XOChip, quirks);
+    /// ```
     pub fn with_custom_quirks(mode: Chirp8Mode, quirks: QuirkFlags) -> Self {
         // Create RAM and display buffer
         cfg_if::cfg_if! {
@@ -295,21 +317,21 @@ impl Chirp8 {
         }
     }
 
-    /// Press the given `key` on the key-pad, between 0 and 15 included.
+    /// Press the given `key` on the key-pad, between 0 (0x0) and 15 (0xF) included.
     pub fn key_press(&mut self, key: u8) {
         if key < KEYS_COUNT {
             self.keys[key as usize] = true;
         }
     }
 
-    /// Release the given `key` on the key-pad, between 0 and 15 included.
+    /// Release the given `key` on the key-pad, between 0 (0x0) and 15 (0xF) included.
     pub fn key_release(&mut self, key: u8) {
         if key < KEYS_COUNT {
             self.keys[key as usize] = false;
         }
     }
 
-    /// Set the given `key` on the key-pad to given `value`, between 0 and 15 included.
+    /// Set the given `key` on the key-pad to given `value`, between 0 (0x0) and 15 (0xF) included.
     /// `pressed` is true when pressed, false when released.
     pub fn key_set(&mut self, key: u8, pressed: bool) {
         if key < KEYS_COUNT {
@@ -356,7 +378,7 @@ impl Chirp8 {
     }
 
     /// Execute one machine instruction, decrement timers if necessary.
-    /// If the interpreter is in idle, if waiting for an interrupt for instance, the step is not taken,
+    /// If the interpreter is idle, if waiting for an interrupt for instance, the step is not taken,
     /// which is to say the `steps` counter is not incremented.
     pub fn step(&mut self) {
         // Big endian instruction
@@ -1324,13 +1346,14 @@ impl Chirp8 {
         self.sound_timer > 0
     }
 
-    /// Indicates whether the emulator has complex sound waves, given by [Chirp8::get_audio_buffer] (true),
+    /// Indicates whether the emulator has complex sound waves (true), given by [Chirp8::get_audio_buffer],
     /// or only simple buzzing sounds (false).
+    /// Only the XO-Chip interpreter has waveforms.
     pub fn has_sound_wave(&self) -> bool {
         self.mode == Chirp8Mode::XOChip
     }
 
-    /// Load a ROM into memory. The ROM must be smaller than `PROGRAM_SIZE`.
+    /// Load a ROM into memory. The ROM must be smaller than [PROGRAM_SIZE].
     /// Returns true if the ROM has been loaded to RAM, false otherwise.
     pub fn load_rom(&mut self, rom: &[u8]) -> bool {
         if rom.len() < PROGRAM_SIZE {

@@ -4,6 +4,11 @@ use crate::Chirp8Mode;
 
 bitflags! {
     /// Represent the deviations from the original Chip-8 language.
+    ///
+    /// A custom quirks configuration can be created as follow :
+    /// ```
+    /// let quirks = QuirkFlags::FLAG_RESET | QuirkFlags::CLIP_SPRITES_HIRES;
+    /// ```
     pub struct QuirkFlags: u16 {
         /// The AND, OR and XOR opcodes (8xy1, 8xy2 and 8xy3) reset the flags register to zero.
         const FLAG_RESET = 1 << 0;
@@ -49,9 +54,8 @@ bitflags! {
     }
 }
 
-impl QuirkFlags {
-    /// Creates the quirks configuration corresponding to given preset.
-    pub fn from_mode(mode: Chirp8Mode) -> QuirkFlags {
+impl From<Chirp8Mode> for QuirkFlags {
+    fn from(mode: Chirp8Mode) -> Self {
         match mode {
             Chirp8Mode::CosmacChip8 => {
                 QuirkFlags::FLAG_RESET
@@ -81,6 +85,13 @@ impl QuirkFlags {
             }
             Chirp8Mode::XOChip => QuirkFlags::INC_INDEX | QuirkFlags::USE_SEVERAL_PLANES,
         }
+    }
+}
+
+impl QuirkFlags {
+    /// Creates the quirks configuration corresponding to given reference interpreter mode.
+    pub fn from_mode(mode: Chirp8Mode) -> Self {
+        Self::from(mode)
     }
 }
 
