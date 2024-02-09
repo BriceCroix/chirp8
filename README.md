@@ -1,3 +1,6 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![CI badge](https://github.com/BriceCroix/chirp8/actions/workflows/rust.yml/badge.svg)
+
 # Chirp8
 
 Chip-8 emulator library written in Rust.
