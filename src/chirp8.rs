@@ -132,7 +132,7 @@ const fn repeat_bits(value: u8, count: usize) -> u8 {
 ///
 /// To create an emulator in specific mode (Super-Chip 1.1 here) :
 /// ```
-/// let emulator = Chirp8::new(Chirp8Mode::SuperChip1_1);
+/// let emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::SuperChip1_1);
 /// ```
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum Chirp8Mode {
@@ -156,10 +156,10 @@ pub enum Chirp8Mode {
 /// Chip-8 Emulator able to execute Chip-8 programs.
 /// Can be configured and used as follow :
 /// ```
-/// let emulator = Chirp8::new(Chirp8Mode::CosmacChip8);
+/// let mut emulator = chirp8::Chirp8::new(chirp8::Chirp8Mode::CosmacChip8);
 /// emulator.set_steps_per_frame(10);
 /// let rom = [0x00]; // ...
-/// emulator.load_rom(&my_rom)
+/// emulator.load_rom(&rom);
 /// emulator.run_frame();
 /// emulator.key_press(0xA);
 /// emulator.run_frame();
@@ -237,8 +237,8 @@ impl Chirp8 {
     /// behavior.
     /// Example :
     /// ```
-    /// let quirks = QuirkFlags::INC_INDEX | QuirkFlags::USE_SEVERAL_PLANES | QuirkFlags::JUMP_XNN;
-    /// let emulator = Chirp8::with_custom_quirks(Chirp8Mode::XOChip, quirks);
+    /// let quirks = chirp8::QuirkFlags::INC_INDEX | chirp8::QuirkFlags::USE_SEVERAL_PLANES | chirp8::QuirkFlags::JUMP_XNN;
+    /// let emulator = chirp8::Chirp8::with_custom_quirks(chirp8::Chirp8Mode::XOChip, quirks);
     /// ```
     pub fn with_custom_quirks(mode: Chirp8Mode, quirks: QuirkFlags) -> Self {
         // Create RAM and display buffer

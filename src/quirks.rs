@@ -7,7 +7,7 @@ bitflags! {
     ///
     /// A custom quirks configuration can be created as follow :
     /// ```
-    /// let quirks = QuirkFlags::FLAG_RESET | QuirkFlags::CLIP_SPRITES_HIRES;
+    /// let quirks = chirp8::QuirkFlags::FLAG_RESET | chirp8::QuirkFlags::CLIP_SPRITES_HIRES;
     /// ```
     pub struct QuirkFlags: u16 {
         /// The AND, OR and XOR opcodes (8xy1, 8xy2 and 8xy3) reset the flags register to zero.
